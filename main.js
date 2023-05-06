@@ -11,7 +11,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 
 	
 	let vein = generateRandomVein()
-	// vein = veinT
+	vein = veinTS
 	vein = new Matrix3D(vein)
 
 	let plain={},adjacent={},placeholder={},data_layers={}
@@ -57,6 +57,29 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	// Adds mesh to scene
 	addMeshToScene(vein, scene)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
 
 	let H = window.innerHeight-10, W = window.innerWidth-10
 	let Wmain = W*2/3

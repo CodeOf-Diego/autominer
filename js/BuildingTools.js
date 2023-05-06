@@ -37,7 +37,11 @@ function findAdjacents(plain) {
     },plain.maxI()+1,plain.maxJ()+1)
 }
 
-
+/**
+ * 
+ * @param {Matrix2D} plain 
+ * @returns 
+ */
 function findDistinctAreas(plain) {
     let i,j,area = 0
     let check, toCheck = []
@@ -75,15 +79,14 @@ function findDistinctAreas(plain) {
                             
                             if (areaPlains[area] === undefined)areaPlains[area]=[]
                             areaPlains[area].push([i,j])
-                            
                             // puts the neighbouring cells in the list to check
-                            if (checked.r(i,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
+                            if (i<plain.maxI() && checked.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
                                 toCheck.push((i+1)+' '+j)
-                            if (checked.d(i,j) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
+                            if (j<plain.maxJ() && checked.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
                                 toCheck.push(i+' '+(j+1))
-                            if (checked.l(i,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
+                            if (i>0 && checked.get(i-1,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
                                 toCheck.push((i-1)+' '+j)
-                            if (checked.u(i,j) === undefined && toCheck.indexOf(i+' '+(j-1)) === -1)
+                            if (j>0 && checked.get(i,j-1) === undefined && toCheck.indexOf(i+' '+(j-1)) === -1)
                                 toCheck.push(i+' '+(j-1))
                         }
                         else {
@@ -142,6 +145,11 @@ function findLShapes(matrix, r, c, cell_l_found) {
             valids.includes(matrix.get(r+d3[0],c+d3[1]))
         ) { 
           LShapes.push([d1,d2,d3]);
+
+            cell_l_found.set(r,c,1)
+            cell_l_found.set(r+d1[0],c+d1[1],1)
+            cell_l_found.set(r+d2[0],c+d2[1],1)
+            cell_l_found.set(r+d3[0],c+d3[1],1)
         }
       }
     }
@@ -157,7 +165,7 @@ function findLShapes(matrix, r, c, cell_l_found) {
 /** scrapes a first set of blocks is the areas is too small to be used */ 
 function disableInvalidAreas(data_layers) {
     let plain=data_layers[0],checked=data_layers[1], areas=data_layers[2],counter=data_layers[3],areaPlains=data_layers[4]
-    let invalids=[],cell_l_found
+    let invalids=[],cell_l_found = new Matrix2D
     
     for (area in counter) {
         if(counter[area] < 4) {
@@ -167,21 +175,38 @@ function disableInvalidAreas(data_layers) {
 
     // Removes the small areas
     plain.loop((i,j)=>{
-        if (invalids.includes(areas.get(i,j)))
+        if (invalids.includes(areas.get(i,j))) {
             plain.set(i,j, Plains.BLOCKED)
+        }
     })
-
+    
     // Removes the area that do not contain an l shape
-
-    // for (area in areaPlains){
-    //     for (i in areaPlains[area]) {
-    //         for (j in areaPlains[area][i]) {
-    //             if (!invalids.includes(area)){
-    //                 console.log('sss'+findLShapes(plain,i,j,cell_l_found))
-    //             }
-    //         }
-    //     }
-    // }
+    
+    let Lshapes, valid
+    for (area in areaPlains){
+        if (!(invalids.includes(parseInt(area)))){
+            valid = false
+            for (i in areaPlains[area]) {
+                let ii = parseInt(areaPlains[area][i][0])
+                let jj = parseInt(areaPlains[area][i][1])
+                // looks for l shapes in each area
+                if (cell_l_found.get(ii,jj) === undefined) {
+                    Lshapes = findLShapes(plain,ii,jj,cell_l_found)
+                    console.log('area '+area+' '+Lshapes)
+                    if (Lshapes.length > 0)
+                        valid = true
+                }
+            }
+            if (!valid) {
+                for (i in areaPlains[area]) {
+                    let ii = parseInt(areaPlains[area][i][0])
+                    let jj = parseInt(areaPlains[area][i][1])
+                    plain.set(ii,jj, Plains.BLOCKED)
+                }
+            }
+        }
+    }
+    aaa=1
 }
 
 
