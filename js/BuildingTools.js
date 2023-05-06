@@ -42,22 +42,23 @@ function findAdjacents(plain) {
  * @param {Matrix2D} plain 
  * @returns 
  */
-function findDistinctAreas(plain) {
+function findDistinctAreas(data_layers) {
+    let plain = data_layers.plain
     let i,j,area = 0
     let check, toCheck = []
     let checked = new Matrix2D(), areas=new Matrix2D(),counter={},areaPlains={}
  
     // loops until the whole plain has been mapped
-    plain.loop((ii,jj)=>{
-        if (checked.get(ii,jj) === undefined && toCheck.indexOf(ii+' '+jj) === -1) {
+    plain.loop((ii)=>{
+        if (checked.get(ii.i,ii.j) === undefined && toCheck.indexOf(ii.i+' '+ii.j) === -1) {
             
-            if (plain.get(ii,jj) == Plains.AMETHIST) {
-                checked.set(ii,jj, Plains.area_AMETHIST)
-                areas.set(ii,jj, 0)
+            if (plain.get(ii.i,ii.j) == Plains.AMETHIST) {
+                checked.set(ii.i,ii.j, Plains.area_AMETHIST)
+                areas.set(ii.i,ii.j, 0)
             }
             else {
                 area++
-                toCheck.push(ii+' '+jj)
+                toCheck.push(ii.i+' '+ii.j)
                 // loops until the whole area has been mapped
                 do {
                     // i for horizontal movement
@@ -98,7 +99,10 @@ function findDistinctAreas(plain) {
             }
         }
     })
-    return [plain, checked, areas, counter, areaPlains]
+    data_layers.checked = checked
+    data_layers.areas = areas
+    data_layers.counter = counter
+    data_layers.areaPlains = areaPlains
 }
 
 /**
@@ -164,24 +168,23 @@ function findLShapes(matrix, r, c, cell_l_found) {
 
 /** scrapes a first set of blocks is the areas is too small to be used */ 
 function disableInvalidAreas(data_layers) {
-    let plain=data_layers[0],checked=data_layers[1], areas=data_layers[2],counter=data_layers[3],areaPlains=data_layers[4]
+    let plain=data_layers.plain, areaPlains=data_layers.areaPlains
     let invalids=[],cell_l_found = new Matrix2D
     
-    for (area in counter) {
-        if(counter[area] < 4) {
+    for (area in data_layers.counter) {
+        if(data_layers.counter[area] < 4) {
             invalids.push(parseInt(area))
         }
     }
 
     // Removes the small areas
-    plain.loop((i,j)=>{
-        if (invalids.includes(areas.get(i,j))) {
-            plain.set(i,j, Plains.BLOCKED)
+    plain.loop((i)=>{
+        if (invalids.includes(data_layers.areas.get(i.i,i.j))) {
+            plain.SET(Plains.BLOCKED)
         }
     })
     
     // Removes the area that do not contain an l shape
-    
     let Lshapes, valid
     for (area in areaPlains){
         if (!(invalids.includes(parseInt(area)))){
@@ -206,6 +209,4 @@ function disableInvalidAreas(data_layers) {
             }
         }
     }
-    aaa=1
 }
-

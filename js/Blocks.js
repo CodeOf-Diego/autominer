@@ -1,13 +1,13 @@
 // export default class Blocks {
-class BlocksClass {
-    AIR = 0
-    AMETHIST = 1
-    PISTON = 2
-    SLIME_BLOCK = 3
-    HONEY_BLOCK = 4
-}
+// class BlocksClass {
+//     AIR = 0
+//     AMETHIST = 1
+//     PISTON = 2
+//     SLIME_BLOCK = 3
+//     HONEY_BLOCK = 4
+// }
 
-const Blocks = new BlocksClass
+// const Blocks = new BlocksClass
 
 
 // class Gradient {
@@ -64,6 +64,7 @@ class PlainClass {
     AIR = ' '
     AMETHIST = 'O'
     ADJACENT = '.'
+    SUPPORT = '+'
     BLOCKED = 'x'
 
     area_AREA = 12

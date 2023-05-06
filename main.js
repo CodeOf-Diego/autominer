@@ -11,21 +11,21 @@ window.addEventListener(`DOMContentLoaded`, () => {
 
 	
 	let vein = generateRandomVein()
-	vein = veinTS
+	vein = veinXX
 	vein = new Matrix3D(vein)
 
-	let plain={},adjacent={},placeholder={},data_layers={},obj_layers={}
-	plain['x'] = generatePlain(vein,'x')
+	let data_layers={x:{},y:{},z:{}},obj_layers={}
+	data_layers.x.plain = generatePlain(vein,'x')
 	// plain['y'] = generatePlain(vein,'y')
 	// plain['z'] = generatePlain(vein,'z')
 
 
-	findAdjacents(plain['x'])
+	findAdjacents(data_layers.x.plain)
 	// findAdjacents(plain['y'])
 	// findAdjacents(plain['z'])
-	data_layers['x'] = findDistinctAreas(plain['x'])
-	disableInvalidAreas(data_layers['x'])
-
+	findDistinctAreas(data_layers.x)
+	disableInvalidAreas(data_layers.x)
+	addSupportBlocks(data_layers.x)
 
 
 	
@@ -42,7 +42,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 
 
 	obj_layers['x']={}
-	obj_layers['x']['blueprint'] = Tools3D.plainToVolume(plain['x'],'x')
+	obj_layers['x']['blueprint'] = Tools3D.plainToVolume(data_layers.x.plain,'x')
 	Tools3D.combineVolumes(vein, obj_layers['x']['blueprint'],'x')
 
 

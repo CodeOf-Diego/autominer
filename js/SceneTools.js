@@ -6,7 +6,7 @@ function addDebugInfo(scene,camera) {
 	debug_info.innerHTML +='Debug info<br>'
 	debug_info.innerHTML +='Total ores: '+ d.oresCount+'<br>'
 	debug_info.innerHTML +='Adjacent ore faces: '+ d.adjacentFaces +' ('+ parseInt(100-(d.adjacentFaces/totalFaces*100)) +'% of theoretical maximum)<br>'
-	// debug_info.innerHTML +='plains blocks:  x:'+ d.plainAdjacents.x +',  y:'+ d.plainAdjacents.y +',  z:'+ d.plainAdjacents.z +'<br>'
+	debug_info.innerHTML +='plains blocks:  x:'+ d.plainAdjacents.x +',  y:'+ d.plainAdjacents.y +',  z:'+ d.plainAdjacents.z +'<br>'
 }
 
 function addMeshToScene(vein, scene) {
@@ -23,7 +23,9 @@ function addMeshToScene(vein, scene) {
 	voxelMaterial[Voxels.AMETHIST] = new THREE.MeshBasicMaterial({ color: 0xff00dd });
 	voxelMaterial[Voxels.SLIME_BLOCK] = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 	voxelMaterial[Voxels.HONEY_BLOCK] = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+
 	voxelMaterial[Plains.ADJACENT] = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+	voxelMaterial[Plains.SUPPORT] = new THREE.MeshBasicMaterial({ color: 0xffbb00 });
 	voxelMaterial[Voxels.BLU] = new THREE.MeshBasicMaterial({ color: 0x0000ff });
 	voxelMaterial[Voxels.RED] = new THREE.MeshBasicMaterial({ color: 0xff0000 });
   
