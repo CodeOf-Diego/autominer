@@ -62,7 +62,6 @@ function findDistinctAreas(plain) {
                     check = check.split(' ')
                     i = parseInt(check[0])
                     j = parseInt(check[1])
-            
                     
                     // skip if already checked
                     if (checked.get(i,j) === undefined) {
@@ -78,13 +77,13 @@ function findDistinctAreas(plain) {
                             areaPlains[area].push([i,j])
                             
                             // puts the neighbouring cells in the list to check
-                            if (i<plain.maxI() && checked.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
+                            if (checked.r(i,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
                                 toCheck.push((i+1)+' '+j)
-                            if (j<plain.maxJ() && checked.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
+                            if (checked.d(i,j) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
                                 toCheck.push(i+' '+(j+1))
-                            if (i>0 && checked.get(i-1,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
+                            if (checked.l(i,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
                                 toCheck.push((i-1)+' '+j)
-                            if (j>0 && checked.get(i,j-1) === undefined && toCheck.indexOf(i+' '+(j-1)) === -1)
+                            if (checked.u(i,j) === undefined && toCheck.indexOf(i+' '+(j-1)) === -1)
                                 toCheck.push(i+' '+(j-1))
                         }
                         else {
@@ -92,11 +91,9 @@ function findDistinctAreas(plain) {
                             areas.set(i,j, 0)                
                         }
                     }
-                    
                 } while (toCheck.length > 0)
             }
         }
-
     })
     return [plain, checked, areas, counter, areaPlains]
 }
