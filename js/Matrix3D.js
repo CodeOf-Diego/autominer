@@ -1,6 +1,8 @@
 class Matrix3D {
-    constructor() {
-        this.matrix = []
+    #hiddenI={}
+
+    constructor(matrix=[]) {
+        this.matrix = matrix
     }
 
     #addDimensionX(x) { if (this.matrix[x] === undefined) this.matrix[x] = []}
@@ -16,14 +18,41 @@ class Matrix3D {
         this.matrix[x][y][z] = value
     }
 
-    maxX() { return this.matrix.length - 1 }
-    maxY() { return this.matrix[0].length -1 }
-    maxZ() { return this.matrix[0][0].length -1 }
+    /** returns the size of a dimension of the matrix */
+    maxX() { return this.matrix.length }
+    maxY() { return this.matrix[0].length }
+    maxZ() { return this.matrix[0][0].length }
+    
+    /** returns the value of a neighboor cell, or out of bounds */
+    xp(x,y,z) { return x > 0 ? this.get(x-1,y,z) : Voxels.OOB}
+    yp(x,y,z) { return y > 0 ? this.get(x,y-1,z) : Voxels.OOB}
+    zp(x,y,z) { return z > 0 ? this.get(x,y,z-1) : Voxels.OOB}
+    xn(x,y,z) { return x < this.maxX()-1 ? this.get(x+1,y,z) : Voxels.OOB}
+    yn(x,y,z) { return y < this.maxY()-1 ? this.get(x,y+1,z) : Voxels.OOB}
+    zn(x,y,z) { return z < this.maxZ()-1 ? this.get(x,y,z+1) : Voxels.OOB}
 
-    XP(x,y,z) { return x > 0 ? this.get(x-1,y,z) : Voxels.OOB}
-    YP(x,y,z) { return y > 0 ? this.get(x,y-1,z) : Voxels.OOB}
-    ZP(x,y,z) { return z > 0 ? this.get(x,y,z-1) : Voxels.OOB}
-    XN(x,y,z) { return x < this.maxX() ? this.get(x+1,y,z) : Voxels.OOB}
-    YN(x,y,z) { return y < this.maxY() ? this.get(x,y+1,z) : Voxels.OOB}
-    YN(x,y,z) { return z < this.maxZ() ? this.get(x,y,z+1) : Voxels.OOB}
+    // Loops the matrix
+    loop(func, max={}, initial={}) {
+        for (let x=initial['x']??0 ; x < (max['x']??this.maxX()) ; x++) {
+            for (let y=initial['y']??0 ; y < (max['y']??this.maxY()) ; y++) {
+                for (let z=initial['z']??0 ; z < (max['z']??this.maxZ()) ; z++) {
+                    this.#hiddenI ={x:x,y:y,z:z}
+                    func(this.#hiddenI)
+                }
+            }
+        }
+    }
+
+    /** When inside a loop, the coordinates for the specific point are kept in the class to avoid the need to pass them every time */
+    GET() { return this.get(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z) }
+    SET(value) { this.set(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z, value) }
+
+    XP() { return this.xp(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z)} 
+    YP() { return this.yp(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z)} 
+    ZP() { return this.zp(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z)} 
+    XN() { return this.xn(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z)} 
+    YN() { return this.yn(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z)} 
+    ZN() { return this.zn(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z)} 
+
+  
 }

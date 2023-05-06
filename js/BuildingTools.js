@@ -6,29 +6,21 @@
  * @param string axis  to compress 
  */
 function generatePlain(vein, axis) {
-    let i={x:0,y:0,z:0}
     let ppd = perpendicular(axis)
    
     let plain = new Matrix2D()
-    for (i.x=0;i.x<vein.length;i.x++) {
-        for (i.y=0;i.y<vein[i.x].length;i.y++) {
-            for (i.z=0;i.z<vein[i.x][i.y].length;i.z++) {
-                if (plain.get(i[ppd[0]],i[ppd[1]]) != Plains.AMETHIST) {
-                    plain.set(i[ppd[0]],i[ppd[1]], vein[i.x][i.y][i.z]==Voxels.AMETHIST?Plains.AMETHIST:Plains.AIR)
-                }
-                
-                if (vein[i.x][i.y][i.z] == Voxels.AMETHIST && d!==false) {
-                    d.plainAdjacents[axis]++
-                
-                    if ((i.x > 0 && vein[i.x-1][i.y][i.z] == Voxels.AMETHIST) ||
-                    (i.y > 0 && vein[i.x][i.y-1][i.z] == Voxels.AMETHIST) ||
-                    (i.z > 0 && vein[i.x][i.y][i.z-1] == Voxels.AMETHIST)) {
-                        d.adjacentFaces+=2
-                    }
-                }
+    vein.loop((i)=>{
+        if (plain.get(i[ppd[0]],i[ppd[1]]) != Plains.AMETHIST) {
+            plain.set(i[ppd[0]],i[ppd[1]], vein.GET()==Voxels.AMETHIST?Plains.AMETHIST:Plains.AIR)
+        }
+        
+        if (vein.GET() == Voxels.AMETHIST && d!==false) {
+            d.plainAdjacents[axis]++
+            if (vein.XP() == Voxels.AMETHIST || vein.YP() == Voxels.AMETHIST || vein.YP() == Voxels.AMETHIST) {
+                d.adjacentFaces+=2
             }
-        }    
-    }
+        }
+    })
     return plain
 }
 
@@ -39,12 +31,10 @@ function generatePlain(vein, axis) {
  * @returns 
  */
 function findAdjacents(plain) {
-    for (let i = 0; i < plain.maxI()+1; i++) {
-      for (let j = 0; j < plain.maxJ()+1; j++) {      
+    plain.loop((i,j)=>{
         if ([plain.L(i,j),plain.R(i,j),plain.U(i,j),plain.D(i,j)].includes(Plains.AMETHIST) && plain.get(i,j)==Plains.AIR)
             plain.set(i,j, Plains.ADJACENT)
-      }
-    }
+    },plain.maxI()+1,plain.maxJ()+1)
 }
 
 
@@ -54,66 +44,60 @@ function findDistinctAreas(plain) {
     let checked = new Matrix2D(), areas=new Matrix2D(),counter={},areaPlains={}
  
     // loops until the whole plain has been mapped
-    for (let ii=0; ii<plain.maxI();ii++) {
-        for (let jj=0; jj<plain.maxJ();jj++) {
-            if (checked.get(ii,jj) === undefined && toCheck.indexOf(ii+' '+jj) === -1) {
-                
-                if (plain.get(ii,jj) == Plains.AMETHIST) {
-                    checked.set(ii,jj, Plains.area_AMETHIST)
-                    areas.set(ii,jj, 0)
-                }
-                else {
-                    area++
-                    if (area==5){
-                        dd=1
-                    }
-                    toCheck.push(ii+' '+jj)
-                    // loops until the whole area has been mapped
-                    do {
-                        // i for horizontal movement
-                        // J for vertical movement
-                        check = toCheck.shift()
-                        check = check.split(' ')
-                        i = parseInt(check[0])
-                        j = parseInt(check[1])
-                
-                        
-                        // skip if already checked
-                        if (checked.get(i,j) === undefined) {
-                            //checks if the cell can belong to the area
-                            if ([Plains.AIR,Plains.ADJACENT].includes(plain.get(i,j))) {
-                                checked.set(i,j, Plains.area_AREA)
-                                areas.set(i,j, area)
-                                
-                                if (counter[area]===undefined) counter[area]=0
-                                counter[area]++
-                                
-                                if (areaPlains[area] === undefined)areaPlains[area]=[]
-                                areaPlains[area].push([i,j])
-                                
-                                // puts the neighbouring cells in the list to check
-                                if (i<plain.maxI() && checked.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
-                                    toCheck.push((i+1)+' '+j)
-                                if (j<plain.maxJ() && checked.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
-                                    toCheck.push(i+' '+(j+1))
-                                if (i>0 && checked.get(i-1,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
-                                    toCheck.push((i-1)+' '+j)
-                                if (j>0 && checked.get(i,j-1) === undefined && toCheck.indexOf(i+' '+(j-1)) === -1)
-                                    toCheck.push(i+' '+(j-1))
-                            }
-                            else {
-                                if(area>1)
-                                dd=1
-                                checked.set(i,j, Plains.area_AMETHIST)
-                                areas.set(i,j, 0)                
-                            }
+    plain.loop((ii,jj)=>{
+        if (checked.get(ii,jj) === undefined && toCheck.indexOf(ii+' '+jj) === -1) {
+            
+            if (plain.get(ii,jj) == Plains.AMETHIST) {
+                checked.set(ii,jj, Plains.area_AMETHIST)
+                areas.set(ii,jj, 0)
+            }
+            else {
+                area++
+                toCheck.push(ii+' '+jj)
+                // loops until the whole area has been mapped
+                do {
+                    // i for horizontal movement
+                    // J for vertical movement
+                    check = toCheck.shift()
+                    check = check.split(' ')
+                    i = parseInt(check[0])
+                    j = parseInt(check[1])
+            
+                    
+                    // skip if already checked
+                    if (checked.get(i,j) === undefined) {
+                        //checks if the cell can belong to the area
+                        if ([Plains.AIR,Plains.ADJACENT].includes(plain.get(i,j))) {
+                            checked.set(i,j, Plains.area_AREA)
+                            areas.set(i,j, area)
+                            
+                            if (counter[area]===undefined) counter[area]=0
+                            counter[area]++
+                            
+                            if (areaPlains[area] === undefined)areaPlains[area]=[]
+                            areaPlains[area].push([i,j])
+                            
+                            // puts the neighbouring cells in the list to check
+                            if (i<plain.maxI() && checked.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
+                                toCheck.push((i+1)+' '+j)
+                            if (j<plain.maxJ() && checked.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
+                                toCheck.push(i+' '+(j+1))
+                            if (i>0 && checked.get(i-1,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
+                                toCheck.push((i-1)+' '+j)
+                            if (j>0 && checked.get(i,j-1) === undefined && toCheck.indexOf(i+' '+(j-1)) === -1)
+                                toCheck.push(i+' '+(j-1))
                         }
-                        
-                    } while (toCheck.length > 0)
-                }
+                        else {
+                            checked.set(i,j, Plains.area_AMETHIST)
+                            areas.set(i,j, 0)                
+                        }
+                    }
+                    
+                } while (toCheck.length > 0)
             }
         }
-    }
+        
+    })
     return [plain, checked, areas, counter, areaPlains]
 }
 
@@ -185,13 +169,10 @@ function disableInvalidAreas(data_layers) {
     }
 
     // Removes the small areas
-    for (let i=0;i<plain.maxI();i++) {
-        for (let j=0;j<plain.maxJ();j++) {
-            if (invalids.includes(areas.get(i,j))){
-                plain.set(i,j, Plains.BLOCKED)
-            }
-        }
-    }
+    plain.loop((i,j)=>{
+        if (invalids.includes(areas.get(i,j)))
+            plain.set(i,j, Plains.BLOCKED)
+    })
 
     // Removes the area that do not contain an l shape
 
@@ -212,41 +193,38 @@ function disableInvalidAreas(data_layers) {
 
 /* Temporary prints of the steps in building the sides */
 function placeholderSide(vein, adjacentPlain, axis) {
-let matrix = new Matrix3D(),id={},offset=2
-let offsets ={
-    x: axis=='x'?offset:0,
+    let matrix = new Matrix3D(),offset=2
+    let ppd = perpendicular(axis)
+    let offsets ={
+        x: axis=='x'?offset:0,
         y: axis=='y'?offset:0,
         z: axis=='z'?offset:0
-}
-let ppd = perpendicular(axis)
-
-
-let maxL = {
-    x: vein.length,
-    y: vein[0].length,
-    z: vein[0][0].length}
-
-let initial = {
-    x: axis=='x'?maxL.x:0,
-    y: axis=='y'?maxL.y:0,
-    z: axis=='z'?maxL.z:0,
-}
-
-for (id.x=initial.x;id.x<maxL.x+offsets.x;id.x++) {
-    for (id.y=initial.y;id.y<maxL.y+offsets.y;id.y++) {
-        for (id.z=initial.z;id.z<maxL.z+offsets.z;id.z++) {
-            
-
-            if (id[axis]==maxL[axis]+offset-1 && adjacentPlain.get(id[ppd[0]],id[ppd[1]]) == Plains.ADJACENT) {
-                matrix.set(id.x,id.y,id.z, Voxels.HONEY_BLOCK)
-            }
-            else {
-                matrix.set(id.x,id.y,id.z, Voxels.AIR)
-            }
-        }
     }
-}
+    let initL = {
+        x: vein.maxX(),
+        y: vein.maxY(),
+        z: vein.maxZ()
+    }
+    let initial = {
+        x: axis=='x'?initL.x:0,
+        y: axis=='y'?initL.y:0,
+        z: axis=='z'?initL.z:0,
+    }
+    let maxL = {
+        x: initL.x + offsets.x,
+        y: initL.y + offsets.y,
+        z: initL.z + offsets.z
+    }
 
-return matrix
+    // Loops the submatrix starting at the end of the polygon and adds it the shape
+    matrix.loop((i) =>  {
+        if (i[axis]==maxL[axis]+offset-1 && adjacentPlain.get(i[ppd[0]],i[ppd[1]]) == Plains.ADJACENT) {
+            matrix.set(i.x,i.y,i.z, Voxels.HONEY_BLOCK)
+        }
+        else {
+            matrix.set(i.x,i.y,i.z, Voxels.AIR)
+        }
+    },maxL, initial)
+    return matrix
 }
 

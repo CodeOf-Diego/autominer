@@ -3,27 +3,13 @@ function combineVoxels(vein,placeholderSides) {
     for (side in placeholderSides) {
         let temp = placeholderSides[side].matrix
 
-			
-	// for (let x=0;x<maxL.x+offsets.x;id.x++) {
-		// for (let y=0;y<maxL.y+offsets.y;id.y++) {
-			// for (let z=0;z<maxL.z+offsets.z;id.z++) {
-
-
-
         for (x in temp) {
             x = parseInt(x)
             for (y in temp[x]) {
                 y = parseInt(y)
                 for (z in temp[x][y]) {
-                    z = parseInt(z)
-
-                    if (vein[x] === undefined)
-                        vein[x] = [] 
-                    if (vein[x][y] === undefined)
-                        vein[x][y] = [] 
-
-
-                    vein[x][y][z] = temp[x][y][z]
+                    z = parseInt(z)	
+                    vein.set(x,y,z,temp[x][y][z])
                 }
             }
         }
@@ -40,7 +26,7 @@ function addDebugInfo(scene,camera) {
 }
 
 function addMeshToScene(vein, scene) {
-	const matrixSize = { x: vein.length, y: vein[0].length, z: vein[0][0].length };
+	const matrixSize = { x: vein.maxX(), y: vein.maxY(), z: vein.maxZ() };
 
 	// Define the size of each voxel
 	let voxelSize = 1;
@@ -60,28 +46,19 @@ function addMeshToScene(vein, scene) {
 	let voxelMeshes = [];
   
 	// Loop through the matrix and create a voxel mesh for each cell
-	for (let x = 0; x < matrixSize.x; x++) {
-	  for (let y = 0; y < matrixSize.y; y++) {
-		for (let z = 0; z < matrixSize.z; z++) {
-			if (vein[x] === undefined)
-				vein[x] = [] 
-			if (vein[x][y] === undefined)
-				vein[x][y] = [] 
-			if (vein[x][y][z] === undefined)
-				vein[x][y][z] = Voxels.AIR
+	vein.loop((i)=> {
+		if (vein.GET() === undefined)
+			vein.SET(Voxels.AIR)
 
-
-		  	if (vein[x][y][z] !== Voxels.AIR) {
-				let voxelMesh = new THREE.Mesh(voxelGeometry, voxelMaterial[vein[x][y][z]]);
-				voxelMesh.position.set(
-				(x - matrixSize.x / 2) * voxelSize,
-				(y - matrixSize.y / 2) * voxelSize,
-				(z - matrixSize.z / 2) * voxelSize
-				);
-				voxelMeshes.push(voxelMesh);
-				scene.add(voxelMesh);
-			}
+		if (vein.GET() !== Voxels.AIR) {
+			let voxelMesh = new THREE.Mesh(voxelGeometry, voxelMaterial[vein.GET()]);
+			voxelMesh.position.set(
+			(i.x - matrixSize.x / 2) * voxelSize,
+			(i.y - matrixSize.y / 2) * voxelSize,
+			(i.z - matrixSize.z / 2) * voxelSize
+			);
+			voxelMeshes.push(voxelMesh);
+			scene.add(voxelMesh);
 		}
-	  }
-	}
+	})
 }

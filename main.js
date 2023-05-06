@@ -11,13 +11,15 @@ window.addEventListener(`DOMContentLoaded`, () => {
 
 	
 	let vein = generateRandomVein()
+	vein = veinT
+	vein = new Matrix3D(vein)
 
 	let plain={},adjacent={},placeholder={},data_layers={}
 	plain['x'] = generatePlain(vein,'x')
 	// plain['y'] = generatePlain(vein,'y')
 	// plain['z'] = generatePlain(vein,'z')
-	
-	
+
+
 	findAdjacents(plain['x'])
 	// findAdjacents(plain['y'])
 	// findAdjacents(plain['z'])
@@ -31,7 +33,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
     // console.log('plain',    data_layers['x'][0])
     // console.log('areas',    data_layers['x'][2])
     // console.log('counter',  data_layers['x'][3])
-    // console.log('vein',  vein)
+    console.log('vein',  vein)
 	
 
 
@@ -39,7 +41,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	// placeholder['y'] = placeholderSide(vein, plain['y'], 'y')
 	// placeholder['z'] = placeholderSide(vein, plain['z'], 'z')
 	
-	vein[2][2][2]= Voxels.RED
+	vein.set(2,2,2,Voxels.RED)
 	// vein[13][13][13]= Voxels.BLU
 	
 	combineVoxels(vein,placeholder)

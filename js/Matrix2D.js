@@ -1,6 +1,6 @@
 class Matrix2D {
-    constructor() {
-        this.plain = []
+    constructor(plain=[]) {
+        this.plain = plain
     }
 
     #addRowIfMissing(i) { if (this.plain[i] === undefined) this.plain[i] = [] }
@@ -22,4 +22,12 @@ class Matrix2D {
     U(i,j) { return j > 0 ? this.get(i,j-1) : Plains.OOB }
     R(i,j) { return i < this.maxI() ? this.get(i+1,j) : Plains.OOB }
     D(i,j) { return j < this.maxJ() ? this.get(i,j+1) : Plains.OOB }
+
+    loop(func, maxI, maxJ) {
+        for (let i=0 ; i < maxI??this.maxI() ; i++) {
+            for (let j=0 ; j < maxJ??this.maxJ() ; j++) {
+                func(i,j)
+            }
+        }
+    }
 }
