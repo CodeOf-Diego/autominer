@@ -29,7 +29,7 @@ class Matrix2D {
         for (let i=initial['i']??0 ; i < (max['i']??this.maxI()) ; i++) {
             for (let j=initial['j']??0 ; j < (max['j']??this.maxJ()) ; j++) {
                 this.#hiddenI ={i:i,j:j}
-                func(i,j)
+                func(this.#hiddenI)
             }
         }
     }

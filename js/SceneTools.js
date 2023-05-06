@@ -1,20 +1,4 @@
 
-function combineVoxels(vein,placeholderSides) {
-    for (side in placeholderSides) {
-        let temp = placeholderSides[side].matrix
-
-        for (x in temp) {
-            x = parseInt(x)
-            for (y in temp[x]) {
-                y = parseInt(y)
-                for (z in temp[x][y]) {
-                    z = parseInt(z)	
-                    vein.set(x,y,z,temp[x][y][z])
-                }
-            }
-        }
-    }
-  }
 
 function addDebugInfo(scene,camera) {
 	let totalFaces = d.oresCount*6
@@ -39,6 +23,7 @@ function addMeshToScene(vein, scene) {
 	voxelMaterial[Voxels.AMETHIST] = new THREE.MeshBasicMaterial({ color: 0xff00dd });
 	voxelMaterial[Voxels.SLIME_BLOCK] = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 	voxelMaterial[Voxels.HONEY_BLOCK] = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+	voxelMaterial[Plains.ADJACENT] = new THREE.MeshBasicMaterial({ color: 0xffff00 });
 	voxelMaterial[Voxels.BLU] = new THREE.MeshBasicMaterial({ color: 0x0000ff });
 	voxelMaterial[Voxels.RED] = new THREE.MeshBasicMaterial({ color: 0xff0000 });
   
@@ -47,10 +32,12 @@ function addMeshToScene(vein, scene) {
   
 	// Loop through the matrix and create a voxel mesh for each cell
 	vein.loop((i)=> {
-		if (vein.GET() === undefined)
-			vein.SET(Voxels.AIR)
+		cell = vein.GET()
+		// if ( === undefined)
+		// 	vein.SET(Voxels.AIR)
 
-		if (vein.GET() !== Voxels.AIR) {
+		// if (vein.GET() !== Voxels.AIR) {
+		if (voxelMaterial[cell]!== undefined) {
 			let voxelMesh = new THREE.Mesh(voxelGeometry, voxelMaterial[vein.GET()]);
 			voxelMesh.position.set(
 			(i.x - matrixSize.x / 2) * voxelSize,

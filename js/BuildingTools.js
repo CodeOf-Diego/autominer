@@ -31,10 +31,10 @@ function generatePlain(vein, axis) {
  * @returns 
  */
 function findAdjacents(plain) {
-    plain.loop((i,j)=>{
-        if ([plain.L(),plain.R(),plain.U(),plain.D()].includes(Plains.AMETHIST) && plain.get(i,j)==Plains.AIR)
-            plain.set(i,j, Plains.ADJACENT)
-    },plain.maxI()+1,plain.maxJ()+1)
+    plain.loop((i)=>{
+        if ([plain.L(),plain.R(),plain.U(),plain.D()].includes(Plains.AMETHIST) && plain.GET()==Plains.AIR)
+            plain.SET(Plains.ADJACENT)
+    })
 }
 
 /**
@@ -207,44 +207,5 @@ function disableInvalidAreas(data_layers) {
         }
     }
     aaa=1
-}
-
-
-
-
-
-/* Temporary prints of the steps in building the sides */
-function placeholderSide(vein, adjacentPlain, axis) {
-    let matrix = new Matrix3D(),offset=2
-    let ppd = perpendicular(axis)
-    let offsets ={
-        x: axis=='x'?offset:0,
-        y: axis=='y'?offset:0,
-        z: axis=='z'?offset:0
-    }
-    let initL = {
-        x: vein.maxX(),
-        y: vein.maxY(),
-        z: vein.maxZ()
-    }
-    let initial = {
-        x: axis=='x'?initL.x:0,
-        y: axis=='y'?initL.y:0,
-        z: axis=='z'?initL.z:0,
-    }
-    let maxL = {
-        x: initL.x + offsets.x,
-        y: initL.y + offsets.y,
-        z: initL.z + offsets.z
-    }
-
-    // Loops the submatrix starting at the end of the polygon and adds it the shape
-    matrix.loop((i) =>  {
-        if (i[axis]==initL[axis]+offset-1 && adjacentPlain.get(i[ppd[0]],i[ppd[1]]) == Plains.ADJACENT)
-            matrix.set(i.x,i.y,i.z, Voxels.HONEY_BLOCK)
-        else
-            matrix.set(i.x,i.y,i.z, Voxels.AIR)
-    },maxL, initial)
-    return matrix
 }
 

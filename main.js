@@ -14,7 +14,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	vein = veinTS
 	vein = new Matrix3D(vein)
 
-	let plain={},adjacent={},placeholder={},data_layers={}
+	let plain={},adjacent={},placeholder={},data_layers={},obj_layers={}
 	plain['x'] = generatePlain(vein,'x')
 	// plain['y'] = generatePlain(vein,'y')
 	// plain['z'] = generatePlain(vein,'z')
@@ -36,15 +36,14 @@ window.addEventListener(`DOMContentLoaded`, () => {
     console.log('vein',  vein)
 	
 
-
-	placeholder['x'] = placeholderSide(vein, plain['x'], 'x')
-	// placeholder['y'] = placeholderSide(vein, plain['y'], 'y')
-	// placeholder['z'] = placeholderSide(vein, plain['z'], 'z')
 	
 	vein.set(2,2,2,Voxels.RED)
 	// vein[13][13][13]= Voxels.BLU
-	
-	combineVoxels(vein,placeholder)
+
+
+	obj_layers['x']={}
+	obj_layers['x']['blueprint'] = Tools3D.plainToVolume(plain['x'],'x')
+	Tools3D.combineVolumes(vein, obj_layers['x']['blueprint'],'x')
 
 
 	// Create a new Three.js scene
@@ -79,7 +78,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 
 
 
-	
+
 
 	let H = window.innerHeight-10, W = window.innerWidth-10
 	let Wmain = W*2/3
