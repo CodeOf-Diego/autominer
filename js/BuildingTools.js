@@ -32,7 +32,7 @@ function generatePlain(vein, axis) {
  */
 function findAdjacents(plain) {
     plain.loop((i,j)=>{
-        if ([plain.L(i,j),plain.R(i,j),plain.U(i,j),plain.D(i,j)].includes(Plains.AMETHIST) && plain.get(i,j)==Plains.AIR)
+        if ([plain.L(),plain.R(),plain.U(),plain.D()].includes(Plains.AMETHIST) && plain.get(i,j)==Plains.AIR)
             plain.set(i,j, Plains.ADJACENT)
     },plain.maxI()+1,plain.maxJ()+1)
 }
@@ -96,7 +96,7 @@ function findDistinctAreas(plain) {
                 } while (toCheck.length > 0)
             }
         }
-        
+
     })
     return [plain, checked, areas, counter, areaPlains]
 }
@@ -218,12 +218,10 @@ function placeholderSide(vein, adjacentPlain, axis) {
 
     // Loops the submatrix starting at the end of the polygon and adds it the shape
     matrix.loop((i) =>  {
-        if (i[axis]==maxL[axis]+offset-1 && adjacentPlain.get(i[ppd[0]],i[ppd[1]]) == Plains.ADJACENT) {
+        if (i[axis]==initL[axis]+offset-1 && adjacentPlain.get(i[ppd[0]],i[ppd[1]]) == Plains.ADJACENT)
             matrix.set(i.x,i.y,i.z, Voxels.HONEY_BLOCK)
-        }
-        else {
+        else
             matrix.set(i.x,i.y,i.z, Voxels.AIR)
-        }
     },maxL, initial)
     return matrix
 }
