@@ -3,17 +3,17 @@
 
 var d={}
 
-if (d!==false) {
-	d.oresCount
-	d.adjacentFaces = 0
-	d.plainAdjacents = {x:0,y:0,z:0}
-	d.plainSupports = {x:0,y:0,z:0}
-}
-
 /**
  * Starting from a passed vein adds a 3D mesh of it in the scene
  */
 function processVein(vein) {
+	if (d!==false) {
+		d.oresCount
+		d.adjacentFaces = 0
+		d.plainAdjacents = {x:0,y:0,z:0}
+		d.plainSupports = {x:0,y:0,z:0}
+	}
+
 	vein = new Matrix3D(vein)
     console.log('vein',  vein)
 
@@ -75,5 +75,9 @@ document.addEventListener('keydown', (event) => {
 		ST.clearScene()
 		let vein = generateRandomVein()
 		processVein(vein)
+		addDebugInfo()
+	}
+	if (event.key === 'i') {
+		debug_info.style.display = (debug_info.style.display == 'none') ? 'block' : 'none';
 	}
 });
