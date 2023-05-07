@@ -32,7 +32,7 @@ function generatePlain(vein, axis) {
  */
 function findAdjacents(plain) {
     plain.loop((i)=>{
-        if ([plain.L(),plain.R(),plain.U(),plain.D()].includes(Plains.AMETHIST) && plain.GET()==Plains.AIR)
+        if ([plain.IP(),plain.IN(),plain.JP(),plain.JN()].includes(Plains.AMETHIST) && plain.GET()==Plains.AIR)
             plain.SET(Plains.ADJACENT)
     })
 }
@@ -195,7 +195,6 @@ function disableInvalidAreas(data_layers) {
                 // looks for l shapes in each area
                 if (cell_l_found.get(ii,jj) === undefined) {
                     Lshapes = findLShapes(plain,ii,jj,cell_l_found)
-                    console.log('area '+area+' '+Lshapes)
                     if (Lshapes.length > 0)
                         valid = true
                 }
@@ -209,4 +208,150 @@ function disableInvalidAreas(data_layers) {
             }
         }
     }
+}
+
+/**
+ * finds all the areas made of adjacent blocks that are adjacents to eachother
+ */
+function findSubAreas(data_layers) {
+    let plain = data_layers.plain
+    let i,j,area = 0
+    let check, toCheck = []
+    let areas=new Matrix2D(),counter={},areaPlains={}
+ 
+    // loops until the whole plain has been mapped
+    plain.loop((ii)=>{
+        if (areas.get(ii.i,ii.j) === undefined && toCheck.indexOf(ii.i+' '+ii.j) === -1) {
+            
+            if (plain.GET() != Plains.ADJACENT) {
+                areas.set(ii.i,ii.j, 0)
+            }
+            else {
+                area++
+                toCheck.push(ii.i+' '+ii.j)
+                // loops until the whole area has been mapped
+                do {
+                    // i for horizontal movement
+                    // J for vertical movement
+                    check = toCheck.shift()
+                    check = check.split(' ')
+                    i = parseInt(check[0])
+                    j = parseInt(check[1])
+                    
+                    // skip if already checked
+                    if (areas.get(i,j) === undefined) {
+                        //checks if the cell can belong to the area
+                        if ([Plains.ADJACENT].includes(plain.get(i,j))) {
+                            areas.set(i,j, area)
+                            
+                            if (counter[area]===undefined) counter[area]=0
+                            counter[area]++
+                            
+                            if (areaPlains[area] === undefined)areaPlains[area]=[]
+                            areaPlains[area].push([i,j])
+                            // puts the neighbouring cells in the list to check
+                            if (i<plain.maxI() && areas.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
+                                toCheck.push((i+1)+' '+j)
+                            if (j<plain.maxJ() && areas.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
+                                toCheck.push(i+' '+(j+1))
+                            if (i>0 && areas.get(i-1,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
+                                toCheck.push((i-1)+' '+j)
+                            if (j>0 && areas.get(i,j-1) === undefined && toCheck.indexOf(i+' '+(j-1)) === -1)
+                                toCheck.push(i+' '+(j-1))
+                        }
+                        else {
+                            areas.set(i,j, 0)                
+                        }
+                    }
+                } while (toCheck.length > 0)
+            }
+        }
+    })
+    data_layers.support.areas = areas
+    data_layers.support.counter = counter
+    data_layers.support.areaPlains = areaPlains
+}
+
+function findSupportBlockLocations(data_layers) {
+    let p = data_layers.plain
+    let a = data_layers.support.areas
+    
+    
+    // list of blocks that connect to adjacents[area of the adjacent that connects][coordinates of the area]
+    let supports = {}
+    p.loop((i)=>{
+
+        if (p.GET() == Plains.AIR) {
+            p.checkAdjacents((value, iAjd)=>{
+                if (value == Plains.ADJACENT) {
+                    if (supports[i.i+' '+i.j] === undefined)            
+                        supports[i.i+' '+i.j]={}
+                    if (supports[i.i+' '+i.j][a.get(iAjd.i,iAjd.j)] == undefined)    
+                        supports[i.i+' '+i.j][a.get(iAjd.i,iAjd.j)] = []
+                    supports[i.i+' '+i.j][a.get(iAjd.i,iAjd.j)].push(iAjd)
+                }
+            })
+        }
+    })
+    data_layers.support.available = supports
+}
+
+function addSupportBlocksFromList(data_layers) {
+    let availables = data_layers.support.available
+    let sets,setsCoords, areasToBind, areaLead, areasToMerge,coordsMain,i,j
+    do {
+        // finds the sets of support with the most neighborhood
+        sets={}
+        setsCoords={}
+        for (coords in availables) {
+            if (sets[Object.keys(availables[coords]).length] === undefined) sets[Object.keys(availables[coords]).length]=[]
+            if (setsCoords[Object.keys(availables[coords]).length] === undefined) setsCoords[Object.keys(availables[coords]).length]=[]
+            sets[Object.keys(availables[coords]).length].push(availables[coords])
+            setsCoords[Object.keys(availables[coords]).length].push(coords)
+        }
+
+        // takes the first one
+        areasToBind = sets[4]?.length > 0 ? sets[4].shift() : (sets[3]?.length > 0 ? sets[3].shift() : sets[2].shift())
+        coordsMain = setsCoords[4]?.length > 0 ? setsCoords[4].shift() : (setsCoords[3]?.length > 0 ? setsCoords[3].shift() : setsCoords[2].shift())
+
+        // adds the support block and merge the neighboors
+        coordsMain = coordsMain.split(' ')
+        i = parseInt(coordsMain[0])
+        j = parseInt(coordsMain[1])
+        data_layers.plain.set(i,j,Plains.SUPPORT)
+        
+        areaLead = Object.keys(areasToBind)[0]
+        areasToMerge = Object.keys(areasToBind).filter(x => ![areaLead].includes(x))
+        for (coords in availables) {
+            for (let i in areasToMerge) {
+                if (availables[coords][areasToMerge[i]] !== undefined) {
+                    if (availables[coords][areaLead] === undefined) availables[coords][areaLead]=[] 
+                    availables[coords][areaLead] = availables[coords][areaLead].concat(availables[coords][areasToMerge[i]])
+                    delete availables[coords][areasToMerge[i]]
+                }
+            }
+        }
+
+        // removes all groups that have 1 neighboor
+        for (coords in availables) { 
+            if (Object.keys(availables[coords]).length === 1)
+                delete availables[coords]
+        }
+
+
+    } while(Object.keys(availables).length > 0)
+    a=1
+}
+
+/**
+ * Tries to find the optimal solution of support blocks to add to the blueprint so that all sticky blocks are connected
+ */
+function addSupportBlocks(data_layers) {
+    data_layers.support = {}
+    // find all subareas given the actual plain configuration
+    findSubAreas(data_layers)
+    // find the blocks neighboors to multiple areas
+    findSupportBlockLocations(data_layers)
+    // checks all the proposed support blocks, starting from the ones with the highest amount of different neighboors
+    addSupportBlocksFromList(data_layers)
 }

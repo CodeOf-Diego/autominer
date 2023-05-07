@@ -11,7 +11,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 
 	
 	let vein = generateRandomVein()
-	vein = veinXX
+	// vein = veinXX
 	vein = new Matrix3D(vein)
 
 	let data_layers={x:{},y:{},z:{}},obj_layers={}

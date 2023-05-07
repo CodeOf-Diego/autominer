@@ -16,7 +16,7 @@ function generateRandomVein() {
     let max = (rad*2)+4
     let mid = max/2
     let range = 2.3
-    let density = 0.4
+    let density = 0.1
 
     let x,y,z
     let vein = []
