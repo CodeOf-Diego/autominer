@@ -9,13 +9,13 @@ function generatePlain(vein, axis) {
     let ppd = perpendicular(axis)
    
     let plain = new Matrix2D()
+    plain.axis = axis
     vein.loop((i)=>{
         if (plain.get(i[ppd[0]],i[ppd[1]]) != Plains.AMETHIST) {
             plain.set(i[ppd[0]],i[ppd[1]], vein.GET()==Voxels.AMETHIST?Plains.AMETHIST:Plains.AIR)
         }
         
         if (vein.GET() == Voxels.AMETHIST && d!==false) {
-            d.plainAdjacents[axis]++
             if (vein.XP() == Voxels.AMETHIST || vein.YP() == Voxels.AMETHIST || vein.YP() == Voxels.AMETHIST) {
                 d.adjacentFaces+=2
             }
@@ -32,8 +32,10 @@ function generatePlain(vein, axis) {
  */
 function findAdjacents(plain) {
     plain.loop((i)=>{
-        if ([plain.IP(),plain.IN(),plain.JP(),plain.JN()].includes(Plains.AMETHIST) && plain.GET()==Plains.AIR)
+        if ([plain.IP(),plain.IN(),plain.JP(),plain.JN()].includes(Plains.AMETHIST) && plain.GET()==Plains.AIR) {
             plain.SET(Plains.ADJACENT)
+            d.plainAdjacents[plain.axis]++
+        }
     })
 }
 
@@ -319,6 +321,8 @@ function addSupportBlocksFromList(data_layers) {
         i = parseInt(coordsMain[0])
         j = parseInt(coordsMain[1])
         data_layers.plain.set(i,j,Plains.SUPPORT)
+        if (d !== false)
+            d.plainSupports[data_layers.plain.axis]++
         
         areaLead = Object.keys(areasToBind)[0]
         areasToMerge = Object.keys(areasToBind).filter(x => ![areaLead].includes(x))

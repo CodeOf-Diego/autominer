@@ -1,146 +1,79 @@
 
+
+
 var d={}
 
 if (d!==false) {
 	d.oresCount
 	d.adjacentFaces = 0
 	d.plainAdjacents = {x:0,y:0,z:0}
+	d.plainSupports = {x:0,y:0,z:0}
 }
 
-window.addEventListener(`DOMContentLoaded`, () => {
-
-	
-	let vein = generateRandomVein()
-	// vein = veinXX
+/**
+ * Starting from a passed vein adds a 3D mesh of it in the scene
+ */
+function processVein(vein) {
 	vein = new Matrix3D(vein)
+    console.log('vein',  vein)
 
-	let data_layers={x:{},y:{},z:{}},obj_layers={}
+	let data_layers={x:{},y:{},z:{}},obj_layers={x:{},y:{},z:{}}
 	data_layers.x.plain = generatePlain(vein,'x')
-	// plain['y'] = generatePlain(vein,'y')
-	// plain['z'] = generatePlain(vein,'z')
-
+	// data_layers.y.plain = generatePlain(vein,'y')
+	// data_layers.z.plain = generatePlain(vein,'z')
 
 	findAdjacents(data_layers.x.plain)
-	// findAdjacents(plain['y'])
-	// findAdjacents(plain['z'])
+	// findAdjacents(data_layers.y.plain)
+	// findAdjacents(data_layers.z.plain)
+
 	findDistinctAreas(data_layers.x)
+	// findDistinctAreas(data_layers.y)
+	// findDistinctAreas(data_layers.z)
 	disableInvalidAreas(data_layers.x)
+	// disableInvalidAreas(data_layers.y)
+	// disableInvalidAreas(data_layers.z)
 	addSupportBlocks(data_layers.x)
+	// addSupportBlocks(data_layers.y)
+	// addSupportBlocks(data_layers.z)
 
 
-	
-    
-    // console.log('plain',    data_layers['x'][0])
-    // console.log('areas',    data_layers['x'][2])
-    // console.log('counter',  data_layers['x'][3])
-    console.log('vein',  vein)
 	
 
 	
 	vein.set(2,2,2,Voxels.RED)
-	// vein[13][13][13]= Voxels.BLU
+	// vein.set(12,12,12,Voxels.BLU)
 
-
-	obj_layers['x']={}
-	obj_layers['x']['blueprint'] = Tools3D.plainToVolume(data_layers.x.plain,'x')
-	Tools3D.combineVolumes(vein, obj_layers['x']['blueprint'],'x')
-
-
-	// Create a new Three.js scene
-	const scene = new THREE.Scene();
-
-
-	const axesLines = new THREE.AxesHelper();
-	scene.add(axesLines);
+	obj_layers.x.blueprint = Tools3D.plainToVolume(data_layers.x.plain,'x')
+	// obj_layers.y.blueprint = Tools3D.plainToVolume(data_layers.y.plain,'y')
+	// obj_layers.z.blueprint = Tools3D.plainToVolume(data_layers.z.plain,'z')
+	Tools3D.combineVolumes(vein, obj_layers.x.blueprint,'x')
+	// Tools3D.combineVolumes(vein, obj_layers.y.blueprint,'y')
+	// Tools3D.combineVolumes(vein, obj_layers.z.blueprint,'z')
 
 	// Adds mesh to scene
-	addMeshToScene(vein, scene)
+	ST.addMeshToScene(vein)
+}
+
+
+window.addEventListener(`DOMContentLoaded`, () => {
+	ST.new()
+
+	let vein = generateRandomVein()
+	// vein = veinXX
+	processVein(vein)
 
 
 
+	addDebugInfo()
 
+	ST.setUpCameras()
+	ST.animate()
+});
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	let H = window.innerHeight-10, W = window.innerWidth-10
-	let Wmain = W*2/3
-	let Horth = H/3
-	let Worth = W - Wmain
-
-	// Create a new Three.js renderer
-	const renderer = new THREE.WebGLRenderer();
-	renderer.setSize(W, H);
-	document.body.appendChild(renderer.domElement);
-
-	// Create a new Three.js camera
-	const camera = new THREE.PerspectiveCamera(
-		75,
-		Wmain / H,
-		0.1,
-		1000
-	);
-  
-	camera.position.x = -12;
-	camera.position.y = 10;
-	camera.position.z = 12;
-
-	const controls = new THREE.OrbitControls(camera, renderer.domElement);
-	controls.enableDamping = true;
-	controls.dampingFactor = 0.05;
-
-	var Ocamera = {}
-	var axes = ['x','y','z']
-	let zoom = H/30
-		axes.forEach((axis)=> {
-		Ocamera[axis] = new THREE.OrthographicCamera(
-			Worth / zoom, Worth / -zoom,
-			Horth / -zoom, Horth / zoom,
-			1, 1000
-		);
-		Ocamera[axis].position.set(axis=='z'?500:0, axis=='y'?500:0, axis=='x'?500:0);
-		Ocamera[axis].lookAt(scene.position);
-	})
-
-
-	addDebugInfo(scene,camera,d)
-
-
-	// Render the scene with each camera
-	function animate() {
-		requestAnimationFrame(animate);
-
-		// Render main camera
-		renderer.setScissorTest(true);
-		renderer.setScissor(0, 0, Wmain, H);
-		renderer.setViewport(0, 0, Wmain, H);
-		renderer.render(scene, camera);
-
-		// Render othogonal cameras
-		axes.forEach((axis,pos)=> {
-			renderer.setScissor(Wmain, Horth*pos, Worth, Horth);
-			renderer.setViewport(Wmain, Horth*pos, Worth, Horth);
-			renderer.render(scene, Ocamera[axis]);
-		})
-
-		controls.update();
+document.addEventListener('keydown', (event) => {
+	if (event.key === 'r') {
+		ST.clearScene()
+		let vein = generateRandomVein()
+		processVein(vein)
 	}
-  	animate();
 });
