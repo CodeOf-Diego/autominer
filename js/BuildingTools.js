@@ -139,12 +139,12 @@ function findLShapes(matrix, r, c, cell_l_found) {
           let d2 = dir[1];
           let d3 = dir[2];
           
-        if (d1[0] >= 0 && d1[0] < matrix.maxI() &&
-            d2[0] >= 0 && d2[0] < matrix.maxI() &&
-            d3[0] >= 0 && d3[0] < matrix.maxI() &&
-            d1[1] >= 0 && d1[1] < matrix.maxJ() &&
-            d2[1] >= 0 && d2[1] < matrix.maxJ() &&
-            d3[1] >= 0 && d3[1] < matrix.maxJ() &&
+        if (r+d1[0] >= 0 && r+d1[0] < matrix.maxI() &&
+            r+d2[0] >= 0 && r+d2[0] < matrix.maxI() &&
+            r+d3[0] >= 0 && r+d3[0] < matrix.maxI() &&
+            c+d1[1] >= 0 && c+d1[1] < matrix.maxJ() &&
+            c+d2[1] >= 0 && c+d2[1] < matrix.maxJ() &&
+            c+d3[1] >= 0 && c+d3[1] < matrix.maxJ() &&
             valids.includes(matrix.get(r,c)) &&
             valids.includes(matrix.get(r+d1[0],c+d1[1])) &&
             valids.includes(matrix.get(r+d2[0],c+d2[1])) &&
