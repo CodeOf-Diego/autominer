@@ -298,53 +298,89 @@ function findSupportBlockLocations(data_layers) {
     data_layers.support.available = supports
 }
 
+/** A sticky piston can only push this many blocks in a row in Minecraft */
+const MAX_PISTON_PUSH = 12
+
+/**
+ * Greedily merges adjacent sub-areas through candidate support blocks, never letting a
+ * merged group exceed MAX_PISTON_PUSH blocks (since each group needs its own piston
+ * machine to push it). Prefers merging as many areas as possible per support block, and
+ * among equal options the merge that fills the group closest to the cap, to keep the
+ * total number of groups as low as possible.
+ *
+ * Note: a single raw sub-area that is already bigger than MAX_PISTON_PUSH on its own
+ * (before any merging) is NOT split here - it's left oversized and reported in
+ * data_layers.support.oversizedAreas. Splitting an oversized contiguous area into
+ * multiple <=12 chunks is a separate problem, not yet implemented.
+ */
 function addSupportBlocksFromList(data_layers) {
     let availables = data_layers.support.available
-    let sets,setsCoords, areasToBind, areaLead, areasToMerge,coordsMain,i,j
+    let sizes = {}
+    for (let area in data_layers.support.counter) sizes[area] = data_layers.support.counter[area]
+
+    let best
     do {
-        // finds the sets of support with the most neighborhood
-        sets={}
-        setsCoords={}
-        for (coords in availables) {
-            if (sets[Object.keys(availables[coords]).length] === undefined) sets[Object.keys(availables[coords]).length]=[]
-            if (setsCoords[Object.keys(availables[coords]).length] === undefined) setsCoords[Object.keys(availables[coords]).length]=[]
-            sets[Object.keys(availables[coords]).length].push(availables[coords])
-            setsCoords[Object.keys(availables[coords]).length].push(coords)
-        }
+        best = null
+        for (let coords in availables) {
+            let touched = Object.keys(availables[coords])
+            if (touched.length < 2) continue
 
-        // takes the first one
-        areasToBind = sets[4]?.length > 0 ? sets[4].shift() : (sets[3]?.length > 0 ? sets[3].shift() : sets[2].shift())
-        coordsMain = setsCoords[4]?.length > 0 ? setsCoords[4].shift() : (setsCoords[3]?.length > 0 ? setsCoords[3].shift() : setsCoords[2].shift())
-
-        // adds the support block and merge the neighboors
-        coordsMain = coordsMain.split(' ')
-        i = parseInt(coordsMain[0])
-        j = parseInt(coordsMain[1])
-        data_layers.plain.set(i,j,Plains.SUPPORT)
-        if (d !== false)
-            d.plainSupports[data_layers.plain.axis]++
-        
-        areaLead = Object.keys(areasToBind)[0]
-        areasToMerge = Object.keys(areasToBind).filter(x => ![areaLead].includes(x))
-        for (coords in availables) {
-            for (let i in areasToMerge) {
-                if (availables[coords][areasToMerge[i]] !== undefined) {
-                    if (availables[coords][areaLead] === undefined) availables[coords][areaLead]=[] 
-                    availables[coords][areaLead] = availables[coords][areaLead].concat(availables[coords][areasToMerge[i]])
-                    delete availables[coords][areasToMerge[i]]
+            // try to fit as many of the touched areas as possible under the cap,
+            // starting from the smallest so more areas have a chance to join in
+            touched.sort((a,b) => sizes[a]-sizes[b])
+            let chosen = [], total = 1 // +1 for the support block itself
+            for (let area of touched) {
+                if (total + sizes[area] <= MAX_PISTON_PUSH) {
+                    chosen.push(area)
+                    total += sizes[area]
                 }
+            }
+            if (chosen.length < 2) continue // this block wouldn't merge anything
+
+            // prefer merging more areas at once, then the fuller resulting group
+            if (best === null || chosen.length > best.chosen.length ||
+                (chosen.length === best.chosen.length && total > best.total)) {
+                best = {coords, chosen, total}
             }
         }
 
-        // removes all groups that have 1 neighboor
-        for (coords in availables) { 
-            if (Object.keys(availables[coords]).length === 1)
-                delete availables[coords]
+        if (best !== null) {
+            let coordsMain = best.coords.split(' ')
+            let i = parseInt(coordsMain[0])
+            let j = parseInt(coordsMain[1])
+            data_layers.plain.set(i,j,Plains.SUPPORT)
+            if (d !== false)
+                d.plainSupports[data_layers.plain.axis]++
+
+            let areaLead = best.chosen[0]
+            let areasToMerge = best.chosen.slice(1)
+            sizes[areaLead] = best.total
+            for (let area of areasToMerge) delete sizes[area]
+
+            for (let coords in availables) {
+                for (let area of areasToMerge) {
+                    if (availables[coords][area] !== undefined) {
+                        if (availables[coords][areaLead] === undefined) availables[coords][areaLead]=[]
+                        availables[coords][areaLead] = availables[coords][areaLead].concat(availables[coords][area])
+                        delete availables[coords][area]
+                    }
+                }
+            }
+            delete availables[best.coords]
+
+            // removes all candidates that no longer bridge 2+ distinct areas
+            for (let coords in availables) {
+                if (Object.keys(availables[coords]).length < 2)
+                    delete availables[coords]
+            }
         }
+    } while (best !== null)
 
-
-    } while(Object.keys(availables).length > 0)
-    a=1
+    data_layers.support.groupSizes = sizes
+    data_layers.support.oversizedAreas = Object.keys(sizes).filter(area => sizes[area] > MAX_PISTON_PUSH)
+    if (data_layers.support.oversizedAreas.length > 0) {
+        console.warn('axis ' + data_layers.plain.axis + ': area(s) over the ' + MAX_PISTON_PUSH + '-block piston limit were not split:', data_layers.support.oversizedAreas)
+    }
 }
 
 /**
