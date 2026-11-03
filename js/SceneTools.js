@@ -3,6 +3,7 @@ class SceneTools {
 	
 	scene
 	renderer
+	axesLines
 	camera
 	Ocamera = {}
 	controls
@@ -12,11 +13,12 @@ class SceneTools {
 		// Create a new Three.js scene
 		ST.scene = new THREE.Scene();
 
-		const axesLines = new THREE.AxesHelper();
-		ST.scene.add(axesLines);
 	}
-
+	
 	setUpCameras() {
+		ST.axesLines  = new THREE.AxesHelper();
+		ST.scene.add(ST.axesLines);
+		
 		ST.H = window.innerHeight-10, ST.W = window.innerWidth-10
 		ST.Wmain = ST.W*2/3
 		ST.Horth = ST.H/3
