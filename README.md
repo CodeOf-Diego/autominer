@@ -15,9 +15,10 @@ Sistema che, data la disposizione di un filone di ametista (il "geoide"), calcol
 
 4. **Struttura dei blocchi di slime** *(da fare)*
    Dalla struttura delle macchine, i blocchi di slime/miele necessari per spingere ed eseguire lo scavo.
+   **Vincolo Minecraft:** un pistone può spingere al massimo **12 blocchi in fila**. Quindi i blocchi da spingere vanno divisi in gruppi/chunk da **massimo 12 blocchi** ciascuno, che non devono confliggere tra loro (es. non spingersi a vicenda in direzioni incompatibili). A parità di copertura, l'algoritmo deve preferire **meno blocchi totali possibile** e soprattutto **meno gruppi possibile**, perché ogni gruppo richiede una piston machine completa a sé stante (costo molto più alto di qualche blocco in più dentro un gruppo già esistente).
 
 5. **Piston machine** *(da fare)*
-   Generare i pistoni che spingono i blocchi di slime.
+   Generare i pistoni che spingono i blocchi di slime — una macchina per ogni gruppo definito nello step 4.
 
 6. **Modello 3D completo** *(da fare)*
    Risultato finale, visionabile e costruibile layer per layer.
