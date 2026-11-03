@@ -49,6 +49,18 @@ function processVein(vein) {
 	pipeline = { vein, data_layers }
 }
 
+/** Downloads the exact vein currently shown, so a specific result can be shared and reloaded later */
+function exportVein() {
+	if (pipeline === null) return
+	let blob = new Blob([JSON.stringify(pipeline.vein.matrix)], { type: 'application/json' })
+	let url = URL.createObjectURL(blob)
+	let a = document.createElement('a')
+	a.href = url
+	a.download = 'vein-' + Date.now() + '.json'
+	a.click()
+	URL.revokeObjectURL(url)
+}
+
 /** Renders one stage of the pipeline (1-4) from the already computed snapshots */
 function renderStage(stage) {
 	if (pipeline === null) return
@@ -98,5 +110,8 @@ document.addEventListener('keydown', (event) => {
 	}
 	if (['1','2','3','4'].includes(event.key)) {
 		renderStage(parseInt(event.key))
+	}
+	if (event.key === 'e') {
+		exportVein()
 	}
 });

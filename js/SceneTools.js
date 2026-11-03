@@ -81,11 +81,14 @@ class SceneTools {
 		voxelMaterial[Voxels.RED] = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 
 		// Cells >= GROUP_ID_OFFSET (see BuildingTools.js) are a final group id rather than a
-		// voxel/plain type - give each distinct group its own color, spread with the golden angle
+		// voxel/plain type - give each distinct group its own color, spread with the golden angle.
+		// Hues are kept inside [45, 275] so they stay well clear of the fixed red debug marker
+		// (hue 0) and the magenta/purple amethyst color (hue ~308), and never get confused with them.
 		let groupMaterial = {}
+		const GROUP_HUE_MIN = 45, GROUP_HUE_MAX = 275
 		function materialForGroup(groupId) {
 			if (groupMaterial[groupId] === undefined) {
-				let hue = (groupId * 137.508) % 360
+				let hue = GROUP_HUE_MIN + ((groupId * 137.508) % (GROUP_HUE_MAX - GROUP_HUE_MIN))
 				groupMaterial[groupId] = new THREE.MeshBasicMaterial({ color: new THREE.Color(`hsl(${hue}, 85%, 55%)`) });
 			}
 			return groupMaterial[groupId]
