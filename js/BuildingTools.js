@@ -16,7 +16,7 @@ function generatePlain(vein, axis) {
         }
         
         if (vein.GET() == Voxels.AMETHIST && d!==false) {
-            if (vein.XP() == Voxels.AMETHIST || vein.YP() == Voxels.AMETHIST || vein.YP() == Voxels.AMETHIST) {
+            if (vein.XP() == Voxels.AMETHIST || vein.YP() == Voxels.AMETHIST || vein.ZP() == Voxels.AMETHIST) {
                 d.adjacentFaces+=2
             }
         }
