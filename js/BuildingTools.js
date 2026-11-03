@@ -83,9 +83,9 @@ function findDistinctAreas(data_layers) {
                             if (areaPlains[area] === undefined)areaPlains[area]=[]
                             areaPlains[area].push([i,j])
                             // puts the neighbouring cells in the list to check
-                            if (i<plain.maxI() && checked.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
+                            if (i<plain.maxI()-1 && checked.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
                                 toCheck.push((i+1)+' '+j)
-                            if (j<plain.maxJ() && checked.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
+                            if (j<plain.maxJ()-1 && checked.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
                                 toCheck.push(i+' '+(j+1))
                             if (i>0 && checked.get(i-1,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
                                 toCheck.push((i-1)+' '+j)
@@ -252,9 +252,9 @@ function findSubAreas(data_layers) {
                             if (areaPlains[area] === undefined)areaPlains[area]=[]
                             areaPlains[area].push([i,j])
                             // puts the neighbouring cells in the list to check
-                            if (i<plain.maxI() && areas.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
+                            if (i<plain.maxI()-1 && areas.get(i+1,j) === undefined && toCheck.indexOf((i+1)+' '+j) === -1)
                                 toCheck.push((i+1)+' '+j)
-                            if (j<plain.maxJ() && areas.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
+                            if (j<plain.maxJ()-1 && areas.get(i,j+1) === undefined && toCheck.indexOf(i+' '+(j+1)) === -1)
                                 toCheck.push(i+' '+(j+1))
                             if (i>0 && areas.get(i-1,j) === undefined && toCheck.indexOf((i-1)+' '+j) === -1)
                                 toCheck.push((i-1)+' '+j)
