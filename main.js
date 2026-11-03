@@ -49,16 +49,30 @@ function processVein(vein) {
 	pipeline = { vein, data_layers }
 }
 
-/** Downloads the exact vein currently shown, so a specific result can be shared and reloaded later */
+/** Briefly shows a message in the stage label, then restores it */
+function flashStageMessage(text) {
+	if (!stage_info) return
+	let original = stage_info.innerHTML
+	stage_info.innerHTML = text
+	setTimeout(() => { stage_info.innerHTML = original }, 1500)
+}
+
+/** Copies the exact vein currently shown to the clipboard, so a specific result can be shared and reloaded later */
 function exportVein() {
 	if (pipeline === null) return
-	let blob = new Blob([JSON.stringify(pipeline.vein.matrix)], { type: 'application/json' })
-	let url = URL.createObjectURL(blob)
-	let a = document.createElement('a')
-	a.href = url
-	a.download = 'vein-' + Date.now() + '.json'
-	a.click()
-	URL.revokeObjectURL(url)
+	let json = JSON.stringify(pipeline.vein.matrix)
+	navigator.clipboard.writeText(json).then(() => {
+		flashStageMessage('Vena copiata negli appunti')
+	}).catch(() => {
+		// clipboard unavailable (e.g. opened via file://, or permission denied) - fall back to a download
+		let blob = new Blob([json], { type: 'application/json' })
+		let url = URL.createObjectURL(blob)
+		let a = document.createElement('a')
+		a.href = url
+		a.download = 'vein-' + Date.now() + '.json'
+		a.click()
+		URL.revokeObjectURL(url)
+	})
 }
 
 /** Renders one stage of the pipeline (1-4) from the already computed snapshots */
