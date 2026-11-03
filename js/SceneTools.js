@@ -79,15 +79,29 @@ class SceneTools {
 		voxelMaterial[Plains.SUPPORT] = new THREE.MeshBasicMaterial({ color: 0xffbb00 });
 		voxelMaterial[Voxels.BLU] = new THREE.MeshBasicMaterial({ color: 0x0000ff });
 		voxelMaterial[Voxels.RED] = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-	  
+
+		// Cells >= GROUP_ID_OFFSET (see BuildingTools.js) are a final group id rather than a
+		// voxel/plain type - give each distinct group its own color, spread with the golden angle
+		let groupMaterial = {}
+		function materialForGroup(groupId) {
+			if (groupMaterial[groupId] === undefined) {
+				let hue = (groupId * 137.508) % 360
+				groupMaterial[groupId] = new THREE.MeshBasicMaterial({ color: new THREE.Color(`hsl(${hue}, 85%, 55%)`) });
+			}
+			return groupMaterial[groupId]
+		}
+
 		// Create a new Three.js voxel mesh array
 		let voxelMeshes = [];
-	  
+
 		// Loop through the matrix and create a voxel mesh for each cell
 		vein.loop((i)=> {
 			let cell = vein.GET()
-			if (voxelMaterial[cell]!== undefined) {
-				let voxelMesh = new THREE.Mesh(voxelGeometry, voxelMaterial[vein.GET()]);
+			let material = typeof cell === 'number' && cell >= GROUP_ID_OFFSET
+				? materialForGroup(cell)
+				: voxelMaterial[cell]
+			if (material !== undefined) {
+				let voxelMesh = new THREE.Mesh(voxelGeometry, material);
 				voxelMesh.position.set(
 				(i.x - matrixSize.x / 2) * voxelSize,
 				(i.y - matrixSize.y / 2) * voxelSize,
@@ -100,7 +114,8 @@ class SceneTools {
 	}
 
 	clearScene() {
-		ST.scene.remove.apply(ST.scene, ST.scene.children);
+		let toRemove = ST.scene.children.filter((child) => child !== ST.axesLines);
+		ST.scene.remove.apply(ST.scene, toRemove);
 	}
 
 	// Render the scene with each camera

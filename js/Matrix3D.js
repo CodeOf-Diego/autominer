@@ -22,6 +22,11 @@ class Matrix3D {
     maxX() { return this.matrix.length }
     maxY() { return this.matrix[0].length }
     maxZ() { return this.matrix[0][0].length }
+
+    /** Deep copy, so rendering a stage doesn't grow/mutate the shared vein */
+    clone() {
+        return new Matrix3D(JSON.parse(JSON.stringify(this.matrix)))
+    }
     
     /** returns the value of a neighboor cell, or out of bounds */
     xp(x,y,z) { return x > 0 ? this.get(x-1,y,z) : Voxels.OOB}

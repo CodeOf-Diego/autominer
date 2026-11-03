@@ -20,6 +20,13 @@ class Matrix2D {
     maxI() { return this.plain.length }
     maxJ() { return this.plain[0].length }
 
+    /** Deep copy, so later pipeline steps can keep mutating the original without touching this snapshot */
+    clone() {
+        let c = new Matrix2D(JSON.parse(JSON.stringify(this.plain)))
+        c.axis = this.axis
+        return c
+    }
+
     ip(i,j) { return i > 0 ? this.get(i-1,j) : Plains.OOB }
     jp(i,j) { return j > 0 ? this.get(i,j-1) : Plains.OOB }
     in(i,j) { return i < this.maxI()-1 ? this.get(i+1,j) : Plains.OOB }

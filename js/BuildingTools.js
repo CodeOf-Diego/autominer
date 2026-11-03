@@ -315,8 +315,16 @@ const MAX_PISTON_PUSH = 12
  */
 function addSupportBlocksFromList(data_layers) {
     let availables = data_layers.support.available
-    let sizes = {}
-    for (let area in data_layers.support.counter) sizes[area] = data_layers.support.counter[area]
+    let sizes = {}, parent = {}
+    for (let area in data_layers.support.counter) {
+        sizes[area] = data_layers.support.counter[area]
+        parent[area] = area
+    }
+    function find(area) {
+        while (parent[area] !== area) area = parent[area]
+        return area
+    }
+    let supportGroup = {} // 'i j' of a placed support block -> area id it was bound to at placement time
 
     let best
     do {
@@ -354,8 +362,12 @@ function addSupportBlocksFromList(data_layers) {
 
             let areaLead = best.chosen[0]
             let areasToMerge = best.chosen.slice(1)
+            supportGroup[best.coords] = areaLead
             sizes[areaLead] = best.total
-            for (let area of areasToMerge) delete sizes[area]
+            for (let area of areasToMerge) {
+                delete sizes[area]
+                parent[area] = areaLead
+            }
 
             for (let coords in availables) {
                 for (let area of areasToMerge) {
@@ -376,11 +388,44 @@ function addSupportBlocksFromList(data_layers) {
         }
     } while (best !== null)
 
+    // resolves every original area id (merged away or not) to its final group's id
+    let finalGroup = {}
+    for (let area in data_layers.support.counter) finalGroup[area] = find(area)
+    for (let coords in supportGroup) finalGroup[supportGroup[coords]] = find(supportGroup[coords])
+
     data_layers.support.groupSizes = sizes
+    data_layers.support.finalGroup = finalGroup
+    data_layers.support.supportGroup = supportGroup
     data_layers.support.oversizedAreas = Object.keys(sizes).filter(area => sizes[area] > MAX_PISTON_PUSH)
     if (data_layers.support.oversizedAreas.length > 0) {
         console.warn('axis ' + data_layers.plain.axis + ': area(s) over the ' + MAX_PISTON_PUSH + '-block piston limit were not split:', data_layers.support.oversizedAreas)
     }
+}
+
+/**
+ * Builds a plain where every ADJACENT/SUPPORT cell holds its final group id (offset by
+ * GROUP_ID_OFFSET so it never collides with a Voxels/Plains value), for per-group coloring.
+ */
+const GROUP_ID_OFFSET = 1000
+function buildGroupPlain(data_layers) {
+    let plain = data_layers.plain
+    let areas = data_layers.support.areas
+    let finalGroup = data_layers.support.finalGroup
+    let supportGroup = data_layers.support.supportGroup
+    let groupPlain = new Matrix2D()
+    plain.loop((i) => {
+        let cell = plain.get(i.i,i.j)
+        let value = undefined
+        if (cell == Plains.ADJACENT) {
+            value = GROUP_ID_OFFSET + parseInt(finalGroup[areas.get(i.i,i.j)])
+        }
+        else if (cell == Plains.SUPPORT) {
+            value = GROUP_ID_OFFSET + parseInt(finalGroup[supportGroup[i.i+' '+i.j]])
+        }
+        // always .set(), even to undefined, so groupPlain keeps the same dimensions as plain
+        groupPlain.set(i.i,i.j, value)
+    })
+    return groupPlain
 }
 
 /**

@@ -1,10 +1,22 @@
 
 
-
 var d={}
 
+/** Holds the last computed vein + per-axis data, so renderStage() can redraw any stage without recomputing */
+let pipeline = null
+let currentStage = 4
+
+const STAGE_NAMES = {
+	1: 'Geoide',
+	2: 'Confini stretti',
+	3: 'Confini validi',
+	4: 'Raggruppamenti (max 12 blocchi)',
+}
+
 /**
- * Starting from a passed vein adds a 3D mesh of it in the scene
+ * Starting from a passed vein, runs the full step-2 pipeline (perimeter, valid areas,
+ * capped support grouping) on all 3 axes, keeping a snapshot after each sub-stage so the
+ * result can be inspected one step at a time with renderStage().
  */
 function processVein(vein) {
 	if (d!==false) {
@@ -17,41 +29,46 @@ function processVein(vein) {
 	vein = new Matrix3D(vein)
     console.log('vein',  vein)
 
-	let data_layers={x:{},y:{},z:{}},obj_layers={x:{},y:{},z:{}}
-	data_layers.x.plain = generatePlain(vein,'x')
-	data_layers.y.plain = generatePlain(vein,'y')
-	data_layers.z.plain = generatePlain(vein,'z')
+	let data_layers={x:{},y:{},z:{}}
+	for (let axis of ['x','y','z']) {
+		data_layers[axis].plain = generatePlain(vein, axis)
+		findAdjacents(data_layers[axis].plain)
+		data_layers[axis].snapshotStretti = data_layers[axis].plain.clone() // stage 2
 
-	findAdjacents(data_layers.x.plain)
-	findAdjacents(data_layers.y.plain)
-	findAdjacents(data_layers.z.plain)
+		findDistinctAreas(data_layers[axis])
+		disableInvalidAreas(data_layers[axis])
+		data_layers[axis].snapshotValide = data_layers[axis].plain.clone() // stage 3
 
-	findDistinctAreas(data_layers.x)
-	findDistinctAreas(data_layers.y)
-	findDistinctAreas(data_layers.z)
-	disableInvalidAreas(data_layers.x)
-	disableInvalidAreas(data_layers.y)
-	disableInvalidAreas(data_layers.z)
-	addSupportBlocks(data_layers.x)
-	addSupportBlocks(data_layers.y)
-	addSupportBlocks(data_layers.z)
+		addSupportBlocks(data_layers[axis])
+		data_layers[axis].snapshotGruppi = buildGroupPlain(data_layers[axis]) // stage 4
+	}
 
-
-	
-
-	
 	vein.set(2,2,2,Voxels.RED)
 	// vein.set(12,12,12,Voxels.BLU)
 
-	obj_layers.x.blueprint = Tools3D.plainToVolume(data_layers.x.plain,'x')
-	obj_layers.y.blueprint = Tools3D.plainToVolume(data_layers.y.plain,'y')
-	obj_layers.z.blueprint = Tools3D.plainToVolume(data_layers.z.plain,'z')
-	Tools3D.combineVolumes(vein, obj_layers.x.blueprint,'x')
-	Tools3D.combineVolumes(vein, obj_layers.y.blueprint,'y')
-	Tools3D.combineVolumes(vein, obj_layers.z.blueprint,'z')
+	pipeline = { vein, data_layers }
+}
 
-	// Adds mesh to scene
-	ST.addMeshToScene(vein)
+/** Renders one stage of the pipeline (1-4) from the already computed snapshots */
+function renderStage(stage) {
+	if (pipeline === null) return
+	currentStage = stage
+	ST.clearScene()
+
+	let display = pipeline.vein.clone()
+	if (stage > 1) {
+		for (let axis of ['x','y','z']) {
+			let snapshot = stage === 2 ? pipeline.data_layers[axis].snapshotStretti
+				: stage === 3 ? pipeline.data_layers[axis].snapshotValide
+				: pipeline.data_layers[axis].snapshotGruppi
+			let blueprint = Tools3D.plainToVolume(snapshot, axis)
+			Tools3D.combineVolumes(display, blueprint, axis)
+		}
+	}
+	ST.addMeshToScene(display)
+
+	if (stage_info)
+		stage_info.innerHTML = 'Stage ' + stage + '/4 - ' + STAGE_NAMES[stage] + ' (tasti 1-4 per cambiare)'
 }
 
 
@@ -62,22 +79,24 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	// vein = veinXX
 	processVein(vein)
 
-
-
 	addDebugInfo()
 
 	ST.setUpCameras()
+	renderStage(currentStage)
 	ST.animate()
 });
 
 document.addEventListener('keydown', (event) => {
 	if (event.key === 'r') {
-		ST.clearScene()
 		let vein = generateRandomVein()
 		processVein(vein)
 		addDebugInfo()
+		renderStage(currentStage)
 	}
 	if (event.key === 'i') {
 		debug_info.style.display = (debug_info.style.display == 'none') ? 'block' : 'none';
+	}
+	if (['1','2','3','4'].includes(event.key)) {
+		renderStage(parseInt(event.key))
 	}
 });
