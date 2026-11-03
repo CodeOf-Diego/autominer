@@ -300,21 +300,23 @@ function findSupportBlockLocations(data_layers) {
 
 /** A sticky piston can only push this many blocks in a row in Minecraft */
 const MAX_PISTON_PUSH = 12
+/** How many randomized attempts to try before keeping the best one found */
+const GROUPING_TRIALS = 40
 
 /**
- * Greedily merges adjacent sub-areas through candidate support blocks, never letting a
- * merged group exceed MAX_PISTON_PUSH blocks (since each group needs its own piston
- * machine to push it). Prefers merging as many areas as possible per support block, and
- * among equal options the merge that fills the group closest to the cap, to keep the
- * total number of groups as low as possible.
- *
- * Note: a single raw sub-area that is already bigger than MAX_PISTON_PUSH on its own
- * (before any merging) is NOT split here - it's left oversized and reported in
- * data_layers.support.oversizedAreas. Splitting an oversized contiguous area into
- * multiple <=12 chunks is a separate problem, not yet implemented.
+ * Runs one greedy merge attempt over a private copy of the candidate list, so many attempts
+ * can be tried without affecting data_layers or each other. Each round picks which support
+ * block to place next using "most constrained first": a node (area) that currently has few
+ * alternative merge partners is prioritized over a more "popular" one, so it doesn't get
+ * stranded later by capacity another merge already claimed. Ties are broken by merging more
+ * areas at once, then filling the group closer to the cap, then randomly - the randomness is
+ * what lets repeated trials explore different outcomes.
  */
-function addSupportBlocksFromList(data_layers) {
-    let availables = data_layers.support.available
+function simulateGrouping(data_layers) {
+    let availables = {}
+    for (let coords in data_layers.support.available) {
+        availables[coords] = { ...data_layers.support.available[coords] }
+    }
     let sizes = {}, parent = {}
     for (let area in data_layers.support.counter) {
         sizes[area] = data_layers.support.counter[area]
@@ -326,9 +328,21 @@ function addSupportBlocksFromList(data_layers) {
     }
     let supportGroup = {} // 'i j' of a placed support block -> area id it was bound to at placement time
 
-    let best
-    do {
-        best = null
+    let progress = true
+    while (progress) {
+        progress = false
+
+        // how many distinct other areas each area could still reach this round
+        let degree = {}
+        for (let coords in availables) {
+            let touched = Object.keys(availables[coords])
+            for (let a of touched) {
+                if (degree[a] === undefined) degree[a] = new Set()
+                for (let b of touched) if (b !== a) degree[a].add(b)
+            }
+        }
+
+        let candidates = []
         for (let coords in availables) {
             let touched = Object.keys(availables[coords])
             if (touched.length < 2) continue
@@ -345,60 +359,148 @@ function addSupportBlocksFromList(data_layers) {
             }
             if (chosen.length < 2) continue // this block wouldn't merge anything
 
-            // prefer merging more areas at once, then the fuller resulting group
-            if (best === null || chosen.length > best.chosen.length ||
-                (chosen.length === best.chosen.length && total > best.total)) {
-                best = {coords, chosen, total}
-            }
+            let minDegree = Math.min(...chosen.map(a => degree[a].size))
+            candidates.push({coords, chosen, total, minDegree})
+        }
+        if (candidates.length === 0) break
+
+        candidates.sort((a,b) =>
+            a.minDegree - b.minDegree ||
+            b.chosen.length - a.chosen.length ||
+            b.total - a.total ||
+            Math.random() - 0.5
+        )
+        let best = candidates[0]
+
+        let areaLead = best.chosen[0]
+        let areasToMerge = best.chosen.slice(1)
+        supportGroup[best.coords] = areaLead
+        sizes[areaLead] = best.total
+        for (let area of areasToMerge) {
+            delete sizes[area]
+            parent[area] = areaLead
         }
 
-        if (best !== null) {
-            let coordsMain = best.coords.split(' ')
-            let i = parseInt(coordsMain[0])
-            let j = parseInt(coordsMain[1])
-            data_layers.plain.set(i,j,Plains.SUPPORT)
-            if (d !== false)
-                d.plainSupports[data_layers.plain.axis]++
-
-            let areaLead = best.chosen[0]
-            let areasToMerge = best.chosen.slice(1)
-            supportGroup[best.coords] = areaLead
-            sizes[areaLead] = best.total
+        for (let coords in availables) {
             for (let area of areasToMerge) {
-                delete sizes[area]
-                parent[area] = areaLead
-            }
-
-            for (let coords in availables) {
-                for (let area of areasToMerge) {
-                    if (availables[coords][area] !== undefined) {
-                        if (availables[coords][areaLead] === undefined) availables[coords][areaLead]=[]
-                        availables[coords][areaLead] = availables[coords][areaLead].concat(availables[coords][area])
-                        delete availables[coords][area]
-                    }
+                if (availables[coords][area] !== undefined) {
+                    if (availables[coords][areaLead] === undefined) availables[coords][areaLead]=[]
+                    availables[coords][areaLead] = availables[coords][areaLead].concat(availables[coords][area])
+                    delete availables[coords][area]
                 }
             }
-            delete availables[best.coords]
-
-            // removes all candidates that no longer bridge 2+ distinct areas
-            for (let coords in availables) {
-                if (Object.keys(availables[coords]).length < 2)
-                    delete availables[coords]
-            }
         }
-    } while (best !== null)
+        delete availables[best.coords]
+
+        // removes all candidates that no longer bridge 2+ distinct areas
+        for (let coords in availables) {
+            if (Object.keys(availables[coords]).length < 2)
+                delete availables[coords]
+        }
+        progress = true
+    }
 
     // resolves every original area id (merged away or not) to its final group's id
     let finalGroup = {}
     for (let area in data_layers.support.counter) finalGroup[area] = find(area)
     for (let coords in supportGroup) finalGroup[supportGroup[coords]] = find(supportGroup[coords])
 
-    data_layers.support.groupSizes = sizes
-    data_layers.support.finalGroup = finalGroup
-    data_layers.support.supportGroup = supportGroup
-    data_layers.support.oversizedAreas = Object.keys(sizes).filter(area => sizes[area] > MAX_PISTON_PUSH)
+    return {sizes, finalGroup, supportGroup}
+}
+
+/**
+ * Scores one simulateGrouping() result: counts the final groups, and checks whether the
+ * groups that end up physically touching (which can only happen through a placed support
+ * block, since two different raw sub-areas are never touching before merging) can be
+ * 2-colored slime/honey. In Minecraft, slime sticks to slime and honey sticks to honey, but
+ * slime and honey don't stick to each other - so two touching groups MUST use different
+ * materials, or they'd get dragged together as one oversized group when a piston fires.
+ * If 3+ groups end up mutually touching (an odd cycle), no 2-coloring exists.
+ */
+function evaluateGrouping(data_layers, result) {
+    let plain = data_layers.plain
+    let areas = data_layers.support.areas
+    let cellToGroup = {}
+    plain.loop((p) => {
+        if (plain.get(p.i,p.j) == Plains.ADJACENT)
+            cellToGroup[p.i+' '+p.j] = result.finalGroup[areas.get(p.i,p.j)]
+    })
+    for (let coords in result.supportGroup) {
+        cellToGroup[coords] = result.finalGroup[result.supportGroup[coords]]
+    }
+
+    let adjList = {}
+    for (let key in cellToGroup) {
+        let [i,j] = key.split(' ').map(Number)
+        let g = cellToGroup[key]
+        if (adjList[g] === undefined) adjList[g] = new Set()
+        for (let [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+            let otherG = cellToGroup[(i+di)+' '+(j+dj)]
+            if (otherG !== undefined && otherG !== g) adjList[g].add(otherG)
+        }
+    }
+
+    let color = {}, bipartite = true, conflictPairs = []
+    for (let g in adjList) {
+        if (color[g] !== undefined) continue
+        color[g] = 0
+        let queue = [g]
+        while (queue.length) {
+            let cur = queue.shift()
+            for (let n of adjList[cur]) {
+                if (color[n] === undefined) { color[n] = 1 - color[cur]; queue.push(n) }
+                else if (color[n] === color[cur]) { bipartite = false; conflictPairs.push([cur, n]) }
+            }
+        }
+    }
+
+    return {bipartite, color, conflictPairs, groupCount: Object.keys(result.sizes).length}
+}
+
+/**
+ * Tries GROUPING_TRIALS randomized merge attempts and keeps the best: a slime/honey
+ * colorable (bipartite) result with the fewest final groups wins, since each group needs
+ * its own piston machine. If no attempt comes out colorable, the least-bad one is kept and
+ * the conflicting groups are reported - that geometry genuinely can't be built with just
+ * two sticky materials and needs a different solution (a physical gap, or separate timing).
+ *
+ * Note: a single raw sub-area that is already bigger than MAX_PISTON_PUSH on its own
+ * (before any merging) is NOT split here - it's left oversized and reported in
+ * data_layers.support.oversizedAreas. Splitting an oversized contiguous area into
+ * multiple <=12 chunks is a separate problem, not yet implemented.
+ */
+function addSupportBlocksFromList(data_layers) {
+    let best = null
+    for (let trial = 0; trial < GROUPING_TRIALS; trial++) {
+        let result = simulateGrouping(data_layers)
+        let evaluation = evaluateGrouping(data_layers, result)
+        if (best === null ||
+            (evaluation.bipartite && !best.evaluation.bipartite) ||
+            (evaluation.bipartite === best.evaluation.bipartite && evaluation.groupCount < best.evaluation.groupCount)) {
+            best = {result, evaluation}
+        }
+    }
+
+    for (let coords in best.result.supportGroup) {
+        let [i,j] = coords.split(' ').map(Number)
+        data_layers.plain.set(i,j,Plains.SUPPORT)
+        if (d !== false)
+            d.plainSupports[data_layers.plain.axis]++
+    }
+
+    data_layers.support.groupSizes = best.result.sizes
+    data_layers.support.finalGroup = best.result.finalGroup
+    data_layers.support.supportGroup = best.result.supportGroup
+    data_layers.support.groupMaterial = best.evaluation.color // {groupId: 0|1} -> slime/honey
+    data_layers.support.bipartite = best.evaluation.bipartite
+    data_layers.support.touchingConflicts = best.evaluation.conflictPairs
+    data_layers.support.oversizedAreas = Object.keys(best.result.sizes).filter(area => best.result.sizes[area] > MAX_PISTON_PUSH)
+
     if (data_layers.support.oversizedAreas.length > 0) {
         console.warn('axis ' + data_layers.plain.axis + ': area(s) over the ' + MAX_PISTON_PUSH + '-block piston limit were not split:', data_layers.support.oversizedAreas)
+    }
+    if (!best.evaluation.bipartite) {
+        console.warn('axis ' + data_layers.plain.axis + ': no slime/honey-colorable grouping found in ' + GROUPING_TRIALS + ' attempts - 3+ groups mutually touch. Conflicting pairs:', best.evaluation.conflictPairs)
     }
 }
 
