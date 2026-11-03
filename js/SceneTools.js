@@ -46,7 +46,9 @@ class SceneTools {
 		ST.controls.dampingFactor = 0.05;
 
 		let zoom = ST.H/30
-			ST.axes.forEach((axis)=> {
+		// what plane each orthogonal camera looks at, since it's not obvious from the viewport alone
+		let planeNames = { x: 'XY', y: 'XZ', z: 'YZ' }
+			ST.axes.forEach((axis,pos)=> {
 			ST.Ocamera[axis] = new THREE.OrthographicCamera(
 				ST.Worth / zoom, ST.Worth / -zoom,
 				ST.Horth / -zoom, ST.Horth / zoom,
@@ -54,6 +56,17 @@ class SceneTools {
 			);
 			ST.Ocamera[axis].position.set(axis=='z'?500:0, axis=='y'?500:0, axis=='x'?500:0);
 			ST.Ocamera[axis].lookAt(ST.scene.position);
+
+			let label = document.createElement('span')
+			label.textContent = planeNames[axis]
+			label.style.position = 'absolute'
+			label.style.zIndex = 10
+			label.style.color = 'white'
+			label.style.fontSize = '16px'
+			label.style.left = (ST.Wmain + 6) + 'px'
+			// viewports are stacked bottom-up in WebGL coordinates, so row `pos` sits (pos+1) rows up from the bottom
+			label.style.top = (ST.H - ST.Horth*(pos+1) + 4) + 'px'
+			document.body.appendChild(label)
 		})
 	}
 
