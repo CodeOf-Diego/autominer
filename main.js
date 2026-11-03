@@ -19,22 +19,22 @@ function processVein(vein) {
 
 	let data_layers={x:{},y:{},z:{}},obj_layers={x:{},y:{},z:{}}
 	data_layers.x.plain = generatePlain(vein,'x')
-	// data_layers.y.plain = generatePlain(vein,'y')
-	// data_layers.z.plain = generatePlain(vein,'z')
+	data_layers.y.plain = generatePlain(vein,'y')
+	data_layers.z.plain = generatePlain(vein,'z')
 
 	findAdjacents(data_layers.x.plain)
-	// findAdjacents(data_layers.y.plain)
-	// findAdjacents(data_layers.z.plain)
+	findAdjacents(data_layers.y.plain)
+	findAdjacents(data_layers.z.plain)
 
 	findDistinctAreas(data_layers.x)
-	// findDistinctAreas(data_layers.y)
-	// findDistinctAreas(data_layers.z)
+	findDistinctAreas(data_layers.y)
+	findDistinctAreas(data_layers.z)
 	disableInvalidAreas(data_layers.x)
-	// disableInvalidAreas(data_layers.y)
-	// disableInvalidAreas(data_layers.z)
+	disableInvalidAreas(data_layers.y)
+	disableInvalidAreas(data_layers.z)
 	addSupportBlocks(data_layers.x)
-	// addSupportBlocks(data_layers.y)
-	// addSupportBlocks(data_layers.z)
+	addSupportBlocks(data_layers.y)
+	addSupportBlocks(data_layers.z)
 
 
 	
@@ -44,11 +44,11 @@ function processVein(vein) {
 	// vein.set(12,12,12,Voxels.BLU)
 
 	obj_layers.x.blueprint = Tools3D.plainToVolume(data_layers.x.plain,'x')
-	// obj_layers.y.blueprint = Tools3D.plainToVolume(data_layers.y.plain,'y')
-	// obj_layers.z.blueprint = Tools3D.plainToVolume(data_layers.z.plain,'z')
+	obj_layers.y.blueprint = Tools3D.plainToVolume(data_layers.y.plain,'y')
+	obj_layers.z.blueprint = Tools3D.plainToVolume(data_layers.z.plain,'z')
 	Tools3D.combineVolumes(vein, obj_layers.x.blueprint,'x')
-	// Tools3D.combineVolumes(vein, obj_layers.y.blueprint,'y')
-	// Tools3D.combineVolumes(vein, obj_layers.z.blueprint,'z')
+	Tools3D.combineVolumes(vein, obj_layers.y.blueprint,'y')
+	Tools3D.combineVolumes(vein, obj_layers.z.blueprint,'z')
 
 	// Adds mesh to scene
 	ST.addMeshToScene(vein)

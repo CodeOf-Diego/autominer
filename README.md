@@ -7,9 +7,8 @@ Sistema che, data la disposizione di un filone di ametista (il "geoide"), calcol
 1. **Geoide** — mappa 3D del filone di ametista.
    Oggi viene generato casualmente ad ogni refresh della pagina, solo per avere dati di demo. In futuro andrà sostituito con un geoide reale e persistito.
 
-2. **Perimetro e supporti per asse** *(step attuale, implementato solo sull'asse X)*
+2. **Perimetro e supporti per asse** *(step attuale, completo su tutti e 3 gli assi)*
    Per ciascuno dei 3 assi: appiattisce il volume in un piano 2D, trova le celle d'aria adiacenti all'ametista, individua le aree isolate, scarta quelle troppo piccole o senza un percorso a L percorribile, e calcola i blocchi di supporto minimi per tenere insieme le aree rimaste.
-   Y e Z sono disabilitati (commentati in `main.js` e `BuildingTools.js`) — da riattivare quando si passa allo step 3.
 
 3. **Struttura delle 3 macchine** *(da fare)*
    Dal perimetro/supporti di ciascun asse, generare la struttura fisica della macchina che scava su quell'asse.
@@ -27,7 +26,7 @@ L'idea di fondo è che il sistema ragioni in automatico sui vari passaggi e li m
 
 ## Stato attuale
 
-- Step 1 (geoide random) e step 2 (solo asse X) funzionanti.
+- Step 1 (geoide random) e step 2 (tutti e 3 gli assi) funzionanti.
 - Rendering con Three.js: camera principale + 3 camere ortogonali (una per asse) per vedere il risultato da più angolazioni contemporaneamente.
 - Nessun build step: file JS separati caricati direttamente in `index.html`, niente bundler.
 
@@ -42,4 +41,4 @@ L'idea di fondo è che il sistema ragioni in automatico sui vari passaggi e li m
 
 ## Prossimo passo
 
-Riattivare l'asse Y e poi Z (uno alla volta) nello step 2, prima di iniziare lo step 3 (struttura delle macchine).
+Iniziare lo step 3: dalla coppia perimetro+supporti di ciascun asse, generare la struttura fisica della macchina che scava su quell'asse.
