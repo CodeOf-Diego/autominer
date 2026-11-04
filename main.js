@@ -12,14 +12,13 @@ let calibrationResult = null
 
 /**
  * Stage 1 manual calibration: automatic Hough detection (calibrationResult below) turned out too
- * noisy on a busy geode screenshot to find real vanishing points. Instead: 2 draggable lines per
- * vanishing point (4 total, 8 draggable endpoints) - the user drags each line's endpoints onto a
- * real block edge they recognize, and that vanishing point is computed live as the intersection
- * of its 2 lines (lineFromPoints/intersectLines, see js/CalibrationTools.js). Placing lines on
- * real edges is more precise than dragging an abstract point, since each endpoint can be pinned
- * exactly where a real edge is. x1 null means "not placed yet" - renderCalibrationStage() seeds
- * default positions once canvas size is known. Kept across stage switches so repositioning isn't
- * needed every time stage 1 is revisited.
+ * noisy on a busy geode screenshot to find real vanishing points. Instead: the user draws 2 lines
+ * by hand along real block edges they recognize (one vanishing direction), then 2 more along a
+ * different direction (a second vanishing point) - 4 lines total. Each pair's vanishing point is
+ * computed live as the intersection of its 2 lines (lineFromPoints/intersectLines, see
+ * js/CalibrationTools.js). Once a line exists it can be fine-tuned by dragging its endpoints.
+ * calibLines[i].x1 === null means that slot hasn't been drawn yet. Kept across stage switches so
+ * retracing isn't needed every time stage 1 is revisited.
  */
 let calibLines = [
 	{ x1: null, y1: null, x2: null, y2: null, vp: 0 },
@@ -28,27 +27,18 @@ let calibLines = [
 	{ x1: null, y1: null, x2: null, y2: null, vp: 1 },
 ]
 const VP_COLORS = ['#3b82f6', '#a855f7']
-let draggingPoint = null // {line, end} (end: 1 or 2) while dragging an endpoint handle, null otherwise
+let draggingPoint = null // {line, end} (end: 1 or 2) while dragging an existing endpoint handle, null otherwise
+let drawingNewLine = null // {line, x1,y1,x2,y2} while drawing a not-yet-committed line into the next empty slot
 let calibrationListenersBound = false
 
-/** Seeds calibLines with default positions (2 roughly non-parallel lines per side), only if unset unless force is true */
-function initCalibLinesDefaults(w, h, force) {
-	if (!force && calibLines[0].x1 !== null) return
-	const FRACS = [
-		[0.05, 0.65, 0.40, 0.30],
-		[0.05, 0.15, 0.40, 0.50],
-		[0.95, 0.65, 0.60, 0.30],
-		[0.95, 0.15, 0.60, 0.50],
-	]
-	calibLines.forEach((line, i) => {
-		let [fx1, fy1, fx2, fy2] = FRACS[i]
-		line.x1 = fx1 * w; line.y1 = fy1 * h; line.x2 = fx2 * w; line.y2 = fy2 * h
-	})
+function resetCalibLines() {
+	for (let line of calibLines) { line.x1 = null; line.y1 = null; line.x2 = null; line.y2 = null }
 }
 
-/** The vanishing point for vpIndex (0 or 1): the intersection of its 2 calibLines, or null if they're too close to parallel */
+/** The vanishing point for vpIndex (0 or 1): the intersection of its 2 calibLines, or null if either isn't drawn yet or they're too close to parallel */
 function computeVP(vpIndex, w, h) {
 	let [a, b] = calibLines.filter((l) => l.vp === vpIndex)
+	if (a.x1 === null || b.x1 === null) return null
 	let ga = lineFromPoints(a.x1, a.y1, a.x2, a.y2)
 	let gb = lineFromPoints(b.x1, b.y1, b.x2, b.y2)
 	if (!ga || !gb) return null
@@ -199,7 +189,6 @@ function renderCalibrationStage() {
 
 	calibration_canvas.width = calibrationImage.naturalWidth
 	calibration_canvas.height = calibrationImage.naturalHeight
-	initCalibLinesDefaults(calibration_canvas.width, calibration_canvas.height, false)
 	setupCalibrationCanvas()
 	redrawCalibrationCanvas()
 
@@ -224,7 +213,7 @@ function imageCoordsFromEvent(event, canvas) {
 	}
 }
 
-/** Redraws the photo + (optionally) the automatic Hough lines + each defining line (extended + its draggable segment/endpoints) + the computed vanishing points, and refreshes the stats panel */
+/** Redraws the photo + (optionally) the automatic Hough lines + each drawn line (extended + its draggable segment/endpoints) + any line mid-draw + the computed vanishing points, and refreshes the stats panel */
 function redrawCalibrationCanvas() {
 	let canvas = calibration_canvas
 	let ctx = canvas.getContext('2d')
@@ -239,10 +228,12 @@ function redrawCalibrationCanvas() {
 		}
 	}
 
+	let drawnLines = calibLines.filter((l) => l.x1 !== null)
+
 	// each line extended well past its own endpoints, thin+faint - so where it's headed (and
 	// whether it agrees with the other block edges beyond the segment itself) is visible at a glance
 	const EXT = Math.max(canvas.width, canvas.height) * 2
-	calibLines.forEach((line) => {
+	drawnLines.forEach((line) => {
 		let dx = line.x2 - line.x1, dy = line.y2 - line.y1
 		let len = Math.hypot(dx, dy) || 1
 		let ux = dx / len, uy = dy / len
@@ -257,7 +248,7 @@ function redrawCalibrationCanvas() {
 	})
 
 	// the actual draggable segment + its 2 endpoint handles, on top and fully opaque
-	calibLines.forEach((line) => {
+	drawnLines.forEach((line) => {
 		ctx.strokeStyle = VP_COLORS[line.vp]
 		ctx.lineWidth = 3
 		ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2); ctx.stroke()
@@ -267,6 +258,15 @@ function redrawCalibrationCanvas() {
 			ctx.strokeStyle = 'black'; ctx.lineWidth = 1.5; ctx.stroke()
 		}
 	})
+
+	// the line currently being drawn from scratch (not committed yet)
+	if (drawingNewLine) {
+		ctx.strokeStyle = VP_COLORS[drawingNewLine.vp]
+		ctx.lineWidth = 3
+		ctx.setLineDash([8, 6])
+		ctx.beginPath(); ctx.moveTo(drawingNewLine.x1, drawingNewLine.y1); ctx.lineTo(drawingNewLine.x2, drawingNewLine.y2); ctx.stroke()
+		ctx.setLineDash([])
+	}
 
 	let vps = [computeVP(0, canvas.width, canvas.height), computeVP(1, canvas.width, canvas.height)]
 	vps.forEach((vp, i) => {
@@ -282,10 +282,15 @@ function redrawCalibrationCanvas() {
 }
 
 function updateCalibrationStats(vps, w, h) {
-	let html = 'Trascina gli estremi delle linee sugli spigoli reali.'
-	if (!vps[0] || !vps[1]) {
-		html += '<br><span style="color:#f87171">2 linee dello stesso colore troppo parallele</span>'
-	} else {
+	let drawnCount = calibLines.filter((l) => l.x1 !== null).length
+	let html
+	if (drawnCount < 2) html = 'Disegna 2 linee lungo spigoli paralleli (1&deg; direzione, blu).'
+	else if (drawnCount < 4) html = 'Ora 2 linee lungo un\'altra direzione (2&deg; direzione, viola).'
+	else html = 'Trascina gli estremi per aggiustare le linee.'
+
+	if (drawnCount >= 2 && !vps[0]) html += '<br><span style="color:#f87171">le 2 linee blu sono troppo parallele</span>'
+	if (drawnCount >= 4 && !vps[1]) html += '<br><span style="color:#f87171">le 2 linee viola sono troppo parallele</span>'
+	if (vps[0] && vps[1]) {
 		let f = calibrateFromPair(vps[0], vps[1], w / 2, h / 2)
 		if (f !== null) {
 			let vFOV = 2 * Math.atan((h / 2) / f) * 180 / Math.PI
@@ -297,18 +302,19 @@ function updateCalibrationStats(vps, w, h) {
 	calibration_stats.innerHTML = html
 }
 
-/** How close (in image px) the mouse must be to an endpoint handle to grab it */
+/** How close (in image px) the mouse must be to an endpoint handle to grab it instead of starting a new line */
 const HANDLE_GRAB_RADIUS = 20
 
-/** Wires up dragging the 4 lines' 8 endpoint handles + the reset/show-auto controls, once */
+/** Wires up drawing the 4 lines from scratch, dragging their endpoints afterwards, + the reset/show-auto controls, once */
 function setupCalibrationCanvas() {
 	if (calibrationListenersBound) return
 	calibrationListenersBound = true
 	let canvas = calibration_canvas
 
-	function allHandles() {
+	function existingHandles() {
 		let pts = []
 		for (let line of calibLines) {
+			if (line.x1 === null) continue
 			pts.push({ line, end: 1, x: line.x1, y: line.y1 })
 			pts.push({ line, end: 2, x: line.x2, y: line.y2 })
 		}
@@ -319,26 +325,46 @@ function setupCalibrationCanvas() {
 		let p = imageCoordsFromEvent(e, canvas)
 		let scale = canvas.width / canvas.getBoundingClientRect().width
 		let closest = null, closestDist = Infinity
-		for (let h of allHandles()) {
+		for (let h of existingHandles()) {
 			let dist = Math.hypot(h.x - p.x, h.y - p.y)
 			if (dist < closestDist) { closestDist = dist; closest = h }
 		}
-		if (closest && closestDist <= HANDLE_GRAB_RADIUS * scale) draggingPoint = closest
+		if (closest && closestDist <= HANDLE_GRAB_RADIUS * scale) {
+			draggingPoint = closest
+			return
+		}
+		// no existing handle nearby - start a brand new line in the next empty slot, if any
+		let emptySlot = calibLines.findIndex((l) => l.x1 === null)
+		if (emptySlot === -1) return
+		drawingNewLine = { slot: emptySlot, vp: calibLines[emptySlot].vp, x1: p.x, y1: p.y, x2: p.x, y2: p.y }
 	})
 	canvas.addEventListener('mousemove', (e) => {
-		if (!draggingPoint) return
 		let p = imageCoordsFromEvent(e, canvas)
-		if (draggingPoint.end === 1) { draggingPoint.line.x1 = p.x; draggingPoint.line.y1 = p.y }
-		else { draggingPoint.line.x2 = p.x; draggingPoint.line.y2 = p.y }
-		redrawCalibrationCanvas()
+		if (draggingPoint) {
+			if (draggingPoint.end === 1) { draggingPoint.line.x1 = p.x; draggingPoint.line.y1 = p.y }
+			else { draggingPoint.line.x2 = p.x; draggingPoint.line.y2 = p.y }
+			redrawCalibrationCanvas()
+		} else if (drawingNewLine) {
+			drawingNewLine.x2 = p.x; drawingNewLine.y2 = p.y
+			redrawCalibrationCanvas()
+		}
 	})
-	canvas.addEventListener('mouseup', () => { draggingPoint = null })
-	canvas.addEventListener('mouseleave', () => { draggingPoint = null })
+	canvas.addEventListener('mouseup', () => {
+		draggingPoint = null
+		if (drawingNewLine) {
+			let length = Math.hypot(drawingNewLine.x2 - drawingNewLine.x1, drawingNewLine.y2 - drawingNewLine.y1)
+			if (length > 10) { // ignore accidental clicks
+				let line = calibLines[drawingNewLine.slot]
+				line.x1 = drawingNewLine.x1; line.y1 = drawingNewLine.y1
+				line.x2 = drawingNewLine.x2; line.y2 = drawingNewLine.y2
+			}
+			drawingNewLine = null
+			redrawCalibrationCanvas()
+		}
+	})
+	canvas.addEventListener('mouseleave', () => { draggingPoint = null; drawingNewLine = null; redrawCalibrationCanvas() })
 
-	calibration_reset.addEventListener('click', () => {
-		initCalibLinesDefaults(canvas.width, canvas.height, true)
-		redrawCalibrationCanvas()
-	})
+	calibration_reset.addEventListener('click', () => { resetCalibLines(); redrawCalibrationCanvas() })
 	calibration_show_auto.addEventListener('change', redrawCalibrationCanvas)
 }
 
