@@ -80,16 +80,18 @@ class ToolsMatrix3D {
     
     /**
      * Fuses 2 voxel volumes together
-     * the second one is written over the first one
-     * @param {Matrix3D} matrix1 
-     * @param {Matrix3D} matrix2 
-     * @param {*} type 
+     * the second one is written over the first one, offset by BLUEPRINT_GAP extra blocks
+     * past matrix1's edge so the two don't visually sit flush against each other
+     * @param {Matrix3D} matrix1
+     * @param {Matrix3D} matrix2
+     * @param {*} type
      */
     combineVolumes(matrix1, matrix2, type) {
+        const BLUEPRINT_GAP = 1
         let max = {
-            x: type === 'x' ? matrix1.maxX() : 0,
-            y: type === 'y' ? matrix1.maxY() : 0,
-            z: type === 'z' ? matrix1.maxZ() : 0,
+            x: type === 'x' ? matrix1.maxX() + BLUEPRINT_GAP : 0,
+            y: type === 'y' ? matrix1.maxY() + BLUEPRINT_GAP : 0,
+            z: type === 'z' ? matrix1.maxZ() + BLUEPRINT_GAP : 0,
         }
         matrix2.loop((i)=>{
             matrix1.set(i.x + max.x,i.y + max.y,i.z + max.z,matrix2.GET())
