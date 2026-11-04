@@ -2,12 +2,14 @@
 
 Sistema che, data la disposizione di un filone di ametista (il "geoide"), calcola il modo ottimale per scavarlo. Lo scavo è affidato a **tre macchine automatiche**, una per ciascun asse (X, Y, Z), che spingono blocchi di slime/miele per rompere l'ametista circostante senza doverla minare manualmente.
 
+Il progetto nasce ispirato al mod [Geodesy](https://github.com/kosmolot-mods/geodesy) (Fabric), che fa la stessa cosa in-game via comandi. Diversi vincoli già implementati qui sono stati confermati/presi dal suo codice sorgente: il range 4-12 blocchi per gruppo, la regola della forma a L (richiesta sul gruppo da spingere, non sulla macchina), l'alternanza slime/honey tra gruppi adiacenti, e il design esatto della flying machine (step 6).
+
 ## Pipeline prevista
 
 1. **Geoide** — mappa 3D del filone di ametista.
    Oggi viene generato casualmente ad ogni refresh della pagina, solo per avere dati di demo. In futuro andrà sostituito con un geoide reale e persistito.
 
-2. **Perimetro e supporti per asse** *(step attuale, completo su tutti e 3 gli assi)*
+2. **Perimetro e supporti per asse** *(completo su tutti e 3 gli assi)*
    Per ciascuno dei 3 assi: appiattisce il volume in un piano 2D, trova le celle d'aria adiacenti all'ametista ("confini stretti"), individua le aree isolate, scarta quelle troppo piccole o senza un percorso a L percorribile, poi fonde i confini stretti vicini in strutture contigue più larghe aggiungendo blocchi di supporto ("confini larghi").
    **Vincolo Minecraft (dimensione):** un pistone può spingere al massimo **12 blocchi in fila**, quindi nessun gruppo fuso può superare i 12 blocchi.
    **Vincolo Minecraft (materiale):** slime si attacca a slime, honey si attacca a honey, ma slime e honey **non** si attaccano tra loro. Due gruppi finali che si toccano fisicamente devono quindi usare materiali diversi, altrimenti si fonderebbero in uno solo sovradimensionato quando un pistone spinge. È un problema di **2-colorazione** sul grafo di adiacenza tra gruppi — non sempre risolvibile se 3+ gruppi si toccano a vicenda (ciclo dispari).
@@ -18,10 +20,11 @@ Sistema che, data la disposizione di un filone di ametista (il "geoide"), calcol
    La randomicità è **deterministica**: ogni esecuzione usa un PRNG seedato (`makePRNG` in `Tools.js`), quindi stesso seed ⇒ stesso risultato (vena + raggruppamento), seed diverso ⇒ risultato diverso.
    **Limite noto:** se un singolo confine stretto (prima di qualsiasi fusione) è già oltre 12 blocchi da solo, oggi **non viene spezzato** — resta sovradimensionato e viene segnalato in `data_layers.support.oversizedAreas` (+ `console.warn`). Spezzare un'area contigua troppo grande in più chunk da ≤12 è un problema a sé, ancora da affrontare.
 
-3. **Struttura delle 3 macchine** *(da fare — prossimo step)*
-   Dal perimetro/supporti di ciascun asse, generare la struttura fisica della macchina che scava su quell'asse.
-   **Requisito:** ogni asse deve essere **swappabile di direzione** — poter scegliere se la macchina si costruisce "sopra" o "sotto" (e analogamente per gli altri due assi), così il calcolo parte dal lato scelto invece che sempre dallo stesso verso.
-   **Requisito:** come nelle flying machine di Minecraft, va previsto un **sistema di ritorno** per il meccanismo a pistoni (non ancora chiaro se basti un blocco o serva altro — da approfondire in fase di progettazione di questo step).
+3. **Struttura delle 3 macchine** *(prima versione fatta, step 6 — vedi sotto)*
+   Dal perimetro/supporti di ciascun asse, generare la struttura fisica della macchina che scava su quell'asse. Implementato come **stage 6** nell'app: una flying machine per ogni gruppo finale, usando il design esatto del mod Geodesy (`js/MachineTools.js`, `MACHINE_TEMPLATE` trascritto da `GeodesyCore.java::buildMachine()` — struttura lineare da 19 blocchi, 9×3×1, non ad L: la L richiesta dal solver è sulla *forma del gruppo* da spingere, non sulla macchina stessa).
+   **Requisito "asse swappabile":** *fatto* — i checkbox "Inverti asse" nel menu impostazioni decidono su quale lato del geoide si costruisce il blueprint/la macchina di quell'asse.
+   **Requisito "sistema di ritorno":** *risolto concettualmente* — il design Geodesy usa due blocchi di obsidian alle estremità della macchina: la flying machine ci sbatte contro e torna indietro, dando il ciclo push→retract automaticamente.
+   **Limite noto:** le macchine di gruppi vicini non vengono controllate per sovrapposizioni — possono compenetrarsi visivamente. Non ancora affrontato.
 
 4. **Struttura dei blocchi di slime** *(da fare)*
    Dalla struttura delle macchine, i blocchi di slime/miele necessari per spingere ed eseguire lo scavo.
@@ -48,6 +51,7 @@ Poiché il calcolo sulla griglia attuale impiega pochi millisecondi, non ha sens
 - **3** — Confini validi (dopo lo scarto delle aree troppo piccole o senza percorso a L)
 - **4** — Raggruppamenti finali da max 12 blocchi, ogni gruppo con un colore diverso (palette fissa di 8 colori, non calcolata — evita che due gruppi vicini ricevano tonalità troppo simili)
 - **5** *(default)* — Materiali: lo stesso raggruppamento ridotto ai soli 2 colori slime (verde) / honey (giallo)
+- **6** — Flying machines: una macchina (design Geodesy, 19 blocchi) per ogni gruppo finale, ancorata al suo centroide ed estesa verso l'esterno lungo l'asse
 
 Dallo stage 4 in su, ogni gruppo ha anche un numero identificativo (0, 1, 2...) stampato sopra di sé in ciascuna delle 3 viste laterali, assegnato in ordine di id area crescente — utile per riferirsi a un gruppo specifico senza ambiguità.
 
@@ -61,9 +65,10 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 
 ## Stato attuale
 
-- Step 1 (geoide random, seedato) e step 2 (tutti e 3 gli assi, con vista a stage 1-5) funzionanti.
+- Step 1 (geoide random, seedato), step 2 (tutti e 3 gli assi) e una prima versione dello step 3 (flying machines, stage 6) funzionanti. Vista a stage 1-6.
 - Rendering con Three.js: camera principale + 3 camere ortogonali (una per asse) per vedere il risultato da più angolazioni contemporaneamente.
 - Nessun build step: file JS separati caricati direttamente in `index.html`, niente bundler.
+- Pagina di riferimento a parte (`flying-machine-templates.html`, aprila direttamente nel browser): modelli 3D esplorabili dei meccanismi a pistoni, utile per verificare visivamente i design prima di fidarsene.
 
 ## Struttura del codice
 
@@ -71,9 +76,10 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 - `js/Matrix2D.js` / `js/Matrix3D.js` — wrapper per matrici 2D/3D con helper per scorrerle, leggere le celle vicine e clonarle (usato per gli snapshot degli stage).
 - `js/Tools.js` — generazione del geoide casuale (seedata) + PRNG deterministico (`makePRNG`), formato compatto delle vene (`veinToSparse`/`veinFromSparse`/`veinFromExport`).
 - `js/BuildingTools.js` — tutta la logica dello step 2 (perimetro, aree, supporti, raggruppamento a 12 blocchi con 2-colorazione slime/honey, centroidi dei gruppi per i numeri identificativi).
-- `js/SceneTools.js` — setup scena/camere Three.js, rendering dei voxel (palette fissa per gruppo allo stage 4, 2 colori materiale allo stage 5), numeri identificativi dei gruppi proiettati sulle viste laterali.
-- `main.js` — orchestratore: genera il geoide da un seed secondo le impostazioni correnti, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-5 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info, `m` per il menu impostazioni) e il menu impostazioni stesso (`setupSettingsMenu()`).
+- `js/MachineTools.js` — step 3: `MACHINE_TEMPLATE` (design Geodesy) e `computeMachineBlocks()`, che lo posiziona per ogni gruppo finale.
+- `js/SceneTools.js` — setup scena/camere Three.js, rendering dei voxel (palette fissa per gruppo allo stage 4, 2 colori materiale allo stage 5, blocchi macchina allo stage 6), numeri identificativi dei gruppi proiettati sulle viste laterali.
+- `main.js` — orchestratore: genera il geoide da un seed secondo le impostazioni correnti, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-6 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info, `m` per il menu impostazioni) e il menu impostazioni stesso (`setupSettingsMenu()`).
 
 ## Prossimo passo
 
-Iniziare lo step 3: dalla coppia perimetro+supporti di ciascun asse, generare la struttura fisica della macchina che scava su quell'asse — tenendo conto dei due requisiti aperti (asse swappabile, sistema di ritorno).
+Risolvere la sovrapposizione tra macchine di gruppi vicini (step 3), poi proseguire con lo step 4 (struttura dei blocchi di slime come dato a sé, non solo visualizzazione) e lo step 5 (pistoni veri, collegamento redstone tra le macchine).
