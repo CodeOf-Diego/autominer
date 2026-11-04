@@ -60,6 +60,9 @@ class Matrix3D {
     ZN() { return this.zn(this.#hiddenI.x,this.#hiddenI.y,this.#hiddenI.z)} 
 }
 
+/** Extra blocks of separation combineVolumes() puts between the vein and each blueprint slab */
+const BLUEPRINT_GAP = 1
+
 class ToolsMatrix3D {
     /**
      * Builds a 3D matrix of a given plain
@@ -87,7 +90,6 @@ class ToolsMatrix3D {
      * @param {*} type
      */
     combineVolumes(matrix1, matrix2, type) {
-        const BLUEPRINT_GAP = 1
         let max = {
             x: type === 'x' ? matrix1.maxX() + BLUEPRINT_GAP : 0,
             y: type === 'y' ? matrix1.maxY() + BLUEPRINT_GAP : 0,

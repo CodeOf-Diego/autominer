@@ -52,6 +52,7 @@ function processVein(vein, seed) {
 		addSupportBlocks(data_layers[axis], axisRng[axis])
 		data_layers[axis].snapshotGruppi = buildGroupPlain(data_layers[axis]) // stage 4
 		data_layers[axis].snapshotMateriali = buildMaterialPlain(data_layers[axis]) // stage 5
+		data_layers[axis].groupLabels = computeGroupLabels(data_layers[axis])
 
 		// groupSizes: {finalGroupId: blocks}, support blocks included (each is <= 12 unless oversized)
 		let sizes = Object.values(data_layers[axis].support.groupSizes)
@@ -118,6 +119,17 @@ function renderStage(stage) {
 		}
 	}
 	ST.addMeshToScene(display)
+
+	// group index numbers only make sense once groups exist (stage 4+)
+	if (stage >= 4) {
+		ST.updateGroupLabels(
+			pipeline.data_layers,
+			{ x: display.maxX(), y: display.maxY(), z: display.maxZ() },
+			{ x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() }
+		)
+	} else {
+		ST.clearGroupLabels()
+	}
 
 	if (stage_info)
 		stage_info.innerHTML = 'Stage ' + stage + '/5 - ' + STAGE_NAMES[stage] + ' (tasti 1-5 per cambiare)'

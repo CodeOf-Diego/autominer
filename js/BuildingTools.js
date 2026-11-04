@@ -505,6 +505,37 @@ function addSupportBlocksFromList(data_layers, rng) {
 }
 
 /**
+ * Computes the centroid (average i,j) of every final group's cells in the plain, and assigns
+ * each group a clean 0-based index in ascending area-id order - so a group can be referred to
+ * as "group 0" / "group 5" and consistently mean the same one across renders of this result.
+ * Returns [{index, i, j}, ...], one entry per final group.
+ */
+function computeGroupLabels(data_layers) {
+    let plain = data_layers.plain
+    let areas = data_layers.support.areas
+    let finalGroup = data_layers.support.finalGroup
+    let supportGroup = data_layers.support.supportGroup
+    let sums = {} // {finalGroupId: {i, j, n}}
+    plain.loop((p) => {
+        let cell = plain.get(p.i,p.j)
+        let group = null
+        if (cell == Plains.ADJACENT) group = finalGroup[areas.get(p.i,p.j)]
+        else if (cell == Plains.SUPPORT) group = finalGroup[supportGroup[p.i+' '+p.j]]
+        if (group !== null) {
+            if (sums[group] === undefined) sums[group] = {i:0, j:0, n:0}
+            sums[group].i += p.i
+            sums[group].j += p.j
+            sums[group].n++
+        }
+    })
+    return Object.keys(sums).sort((a,b) => Number(a)-Number(b)).map((groupId, index) => ({
+        index,
+        i: sums[groupId].i / sums[groupId].n,
+        j: sums[groupId].j / sums[groupId].n,
+    }))
+}
+
+/**
  * Builds a plain where every ADJACENT/SUPPORT cell holds its final group id (offset by
  * GROUP_ID_OFFSET so it never collides with a Voxels/Plains value), for per-group coloring.
  */
