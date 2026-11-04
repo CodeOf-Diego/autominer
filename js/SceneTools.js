@@ -138,7 +138,8 @@ class SceneTools {
 
 
 	
-	addMeshToScene(vein) {
+	/** layerY: when set (see main.js's layerView), draws only the cells at that world Y instead of the whole vein/blueprint */
+	addMeshToScene(vein, layerY) {
 		const matrixSize = { x: vein.maxX(), y: vein.maxY(), z: vein.maxZ() };
 	
 		// Define the size of each voxel
@@ -187,6 +188,7 @@ class SceneTools {
 
 		// Loop through the matrix and create a voxel mesh for each cell
 		vein.loop((i)=> {
+			if (layerY !== null && layerY !== undefined && i.y !== layerY) return
 			let cell = vein.GET()
 			let material
 			if (typeof cell === 'number' && cell >= MATERIAL_ID_OFFSET) material = materialForMaterial(cell - MATERIAL_ID_OFFSET)
@@ -208,11 +210,13 @@ class SceneTools {
 	/**
 	 * Renders a list of MachineTools.computeMachineBlocks() blocks with real textures, oriented
 	 * correctly for pistons/observers, using the same centering convention as addMeshToScene()
-	 * so they line up with it.
+	 * so they line up with it. layerY: when set (see main.js's layerView), draws only the blocks
+	 * at that world Y instead of the whole machine.
 	 */
-	addMachinesToScene(machineBlocks, displaySize) {
+	addMachinesToScene(machineBlocks, displaySize, layerY) {
 		const voxelSize = 1;
 		let voxelGeometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
+		if (layerY !== null && layerY !== undefined) machineBlocks = machineBlocks.filter((b) => b.y === layerY);
 
 		// converts a template-local facing ('along'/'-along'/'up'/'-up') into a world [dx,dy,dz]
 		function facingToWorldDir(b) {

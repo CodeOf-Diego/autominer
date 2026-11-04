@@ -55,6 +55,8 @@ Poiché il calcolo sulla griglia attuale impiega pochi millisecondi, non ha sens
 
 Dallo stage 4 in su, ogni gruppo ha anche un numero identificativo (0, 1, 2...) stampato sopra di sé in ciascuna delle 3 viste laterali, assegnato in ordine di id area crescente — utile per riferirsi a un gruppo specifico senza ambiguità.
 
+**Vista a livelli (step 8, tasto `l`)** — mostra un solo livello Y alla volta invece dell'intera scena (geoide + blueprint + macchine), qualunque sia lo stage corrente. Serve a costruire e verificare il risultato in Minecraft un layer orizzontale per volta, come si fa davvero in gioco (utile soprattutto allo stage 6 per controllare che una flying machine funzioni davvero prima di costruire tutto). Frecce su/giù per cambiare livello, `l` di nuovo per tornare alla vista completa.
+
 Altri tasti: `r` rigenera una nuova vena casuale (con le impostazioni correnti), `e` copia vena+seed negli appunti (vedi sotto), `i` mostra/nasconde il pannello di debug, `m` mostra/nasconde il menu impostazioni.
 
 Quando si aggiungeranno gli step 3+, andranno integrati in questa stessa vista a stage.
@@ -65,7 +67,7 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 
 ## Stato attuale
 
-- Step 1 (geoide random, seedato), step 2 (tutti e 3 gli assi) e una prima versione dello step 3 (flying machines, stage 6) funzionanti. Vista a stage 1-6.
+- Step 1 (geoide random, seedato), step 2 (tutti e 3 gli assi) e una prima versione dello step 3 (flying machines, stage 6) funzionanti. Vista a stage 1-6, più vista a livelli (step 8, tasto `l`) per ispezionare/costruire un singolo livello Y alla volta.
 - Rendering con Three.js: camera principale + 3 camere ortogonali (una per asse) per vedere il risultato da più angolazioni contemporaneamente.
 - Nessun build step: file JS separati caricati direttamente in `index.html`, niente bundler.
 - Pagina di riferimento a parte (`flying-machine-templates.html`, aprila direttamente nel browser): modelli 3D esplorabili dei meccanismi a pistoni, utile per verificare visivamente i design prima di fidarsene.
@@ -78,7 +80,7 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 - `js/BuildingTools.js` — tutta la logica dello step 2 (perimetro, aree, supporti, raggruppamento a 12 blocchi con 2-colorazione slime/honey, centroidi dei gruppi per i numeri identificativi).
 - `js/MachineTools.js` — step 3: `MACHINE_TEMPLATE` (design Geodesy) e `computeMachineBlocks()`, che lo posiziona per ogni gruppo finale.
 - `js/SceneTools.js` — setup scena/camere Three.js, rendering dei voxel (palette fissa per gruppo allo stage 4, 2 colori materiale allo stage 5, blocchi macchina allo stage 6), numeri identificativi dei gruppi proiettati sulle viste laterali.
-- `main.js` — orchestratore: genera il geoide da un seed secondo le impostazioni correnti, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-6 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info, `m` per il menu impostazioni) e il menu impostazioni stesso (`setupSettingsMenu()`).
+- `main.js` — orchestratore: genera il geoide da un seed secondo le impostazioni correnti, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-6 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info, `m` per il menu impostazioni, `l` + frecce su/giù per la vista a livelli) e il menu impostazioni stesso (`setupSettingsMenu()`).
 
 ## Prossimo passo
 

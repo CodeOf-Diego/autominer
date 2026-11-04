@@ -6,6 +6,13 @@ var d={}
 let pipeline = null
 let currentStage = 5
 
+/**
+ * Step 8: layer-by-layer view. When enabled, renderStage() draws only the single world-Y slice
+ * `y` (of whichever stage is current) instead of the whole thing - so a build can be followed
+ * and verified in Minecraft one horizontal layer at a time, the way players actually build.
+ */
+let layerView = { enabled: false, y: 0 }
+
 /** Generation/layout settings, editable from the settings menu (index.html + setupSettingsMenu() below) */
 let settings = {
 	density: 0.05,  // fraction of shell cells that become amethyst
@@ -131,10 +138,16 @@ function renderStage(stage) {
 		}
 		display = Tools3D.buildDisplay(pipeline.vein, snapshots, settings.gap, settings.invert, settings.show)
 	}
-	ST.addMeshToScene(display)
 
 	let displaySize = { x: display.maxX(), y: display.maxY(), z: display.maxZ() }
 	let originalSize = { x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() }
+
+	// clamp the layer to whatever this stage's display actually spans, so switching stage/axis
+	// visibility never leaves it pointing past the top (or stuck on a now-nonexistent slice)
+	if (layerView.y >= displaySize.y) layerView.y = Math.max(0, displaySize.y - 1)
+	let layerY = layerView.enabled ? layerView.y : null
+
+	ST.addMeshToScene(display, layerY)
 
 	// group index numbers only make sense once groups exist (stage 4+)
 	if (stage >= 4) {
@@ -153,12 +166,16 @@ function renderStage(stage) {
 		for (let axis of ['x','y','z']) {
 			if (!settings.show[axis]) continue
 			let blocks = computeMachineBlocks(pipeline.data_layers[axis], axis, originalSize, settings.gap, settings.invert, shift)
-			ST.addMachinesToScene(blocks, displaySize)
+			ST.addMachinesToScene(blocks, displaySize, layerY)
 		}
 	}
 
-	if (stage_info)
-		stage_info.innerHTML = 'Stage ' + stage + '/6 - ' + STAGE_NAMES[stage] + ' (tasti 1-6 per cambiare)'
+	if (stage_info) {
+		let label = 'Stage ' + stage + '/6 - ' + STAGE_NAMES[stage] + ' (tasti 1-6 per cambiare)'
+		if (layerView.enabled) label += ' | Layer ' + layerView.y + '/' + (displaySize.y - 1) + ' (freccie su/giù, \'l\' per uscire)'
+		else label += " ('l' per vista a livelli)"
+		stage_info.innerHTML = label
+	}
 }
 
 /** 0 -> "100% honey", 100 -> "100% slime", in between -> the split, e.g. "70% slime / 30% honey" */
@@ -269,5 +286,14 @@ document.addEventListener('keydown', (event) => {
 	}
 	if (event.key === 'e') {
 		exportVein()
+	}
+	if (event.key === 'l') {
+		layerView.enabled = !layerView.enabled
+		renderStage(currentStage)
+	}
+	if (layerView.enabled && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+		event.preventDefault() // don't scroll the page
+		layerView.y = Math.max(0, layerView.y + (event.key === 'ArrowUp' ? 1 : -1))
+		renderStage(currentStage)
 	}
 });
