@@ -30,9 +30,10 @@ Sistema che, data la disposizione di un filone di ametista (il "geoide"), calcol
    Risultato finale: visionabile e costruibile **layer per layer**, con possibilità di **esportare uno schematic** (es. formato Minecraft .schematic/.litematic).
    **Requisito:** calcolare anche il **costo in numero di risorse** (pistoni, blocchi di slime/miele, ecc.) necessario a costruire il tutto.
 
-## Requisiti di interfaccia (trasversali, da fare)
+## Requisiti di interfaccia (trasversali)
 
-- Menu per: caricare una nuova build a partire da una foto (da definire come, rimandato), aprirne una tra quelle salvate in **local storage**, o generarne una randomica (quello che si fa oggi) per vedere come funziona.
+- **Menu impostazioni generazione** *(fatto, tasto `m`)* — densità ore, range (spessore guscio), distanza macchine dal geoide, inversione per asse (quale lato del geoide ospita il blueprint/confini di quell'asse — primo passo verso il requisito "asse swappabile" dello step 3), import di un JSON (sparse o denso), bottone Generate (usa il JSON incollato se presente, altrimenti genera random dagli slider). Include anche uno slider di preferenza slime/honey (0=honey..100=slime, default 100) — **solo UI per ora**, non ancora collegato all'algoritmo di raggruppamento/colorazione (verrà implementato in seguito: più lo slider pende verso slime, più il sistema dovrebbe preferire quel materiale nella 2-colorazione, pur restando garantito un minimo di entrambi dato che una build di un solo materiale è estremamente improbabile).
+- Menu per: caricare una nuova build a partire da una foto (da definire come, rimandato), aprirne una tra quelle salvate in **local storage** *(ancora da fare — oggi solo import via JSON incollato)*.
 - Vista di avanzamento manuale della pipeline (vedi sotto) — già presente per lo step 2, da estendere man mano che si aggiungono gli step successivi.
 
 ## Visualizzazione a stage (step 2)
@@ -45,7 +46,9 @@ Poiché il calcolo sulla griglia attuale impiega pochi millisecondi, non ha sens
 - **4** — Raggruppamenti finali da max 12 blocchi, ogni gruppo con un colore diverso (palette fissa di 8 colori, non calcolata — evita che due gruppi vicini ricevano tonalità troppo simili)
 - **5** *(default)* — Materiali: lo stesso raggruppamento ridotto ai soli 2 colori slime (verde) / honey (giallo)
 
-Altri tasti: `r` rigenera una nuova vena casuale, `e` copia vena+seed negli appunti (vedi sotto), `i` mostra/nasconde il pannello di debug.
+Dallo stage 4 in su, ogni gruppo ha anche un numero identificativo (0, 1, 2...) stampato sopra di sé in ciascuna delle 3 viste laterali, assegnato in ordine di id area crescente — utile per riferirsi a un gruppo specifico senza ambiguità.
+
+Altri tasti: `r` rigenera una nuova vena casuale (con le impostazioni correnti), `e` copia vena+seed negli appunti (vedi sotto), `i` mostra/nasconde il pannello di debug, `m` mostra/nasconde il menu impostazioni.
 
 Quando si aggiungeranno gli step 3+, andranno integrati in questa stessa vista a stage.
 
@@ -64,9 +67,9 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 - `js/Blocks.js` — enum dei tipi di voxel/blocco.
 - `js/Matrix2D.js` / `js/Matrix3D.js` — wrapper per matrici 2D/3D con helper per scorrerle, leggere le celle vicine e clonarle (usato per gli snapshot degli stage).
 - `js/Tools.js` — generazione del geoide casuale (seedata) + PRNG deterministico (`makePRNG`), formato compatto delle vene (`veinToSparse`/`veinFromSparse`/`veinFromExport`).
-- `js/BuildingTools.js` — tutta la logica dello step 2 (perimetro, aree, supporti, raggruppamento a 12 blocchi con 2-colorazione slime/honey).
-- `js/SceneTools.js` — setup scena/camere Three.js e rendering dei voxel (palette fissa per gruppo allo stage 4, 2 colori materiale allo stage 5).
-- `main.js` — orchestratore: genera il geoide da un seed, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-5 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info).
+- `js/BuildingTools.js` — tutta la logica dello step 2 (perimetro, aree, supporti, raggruppamento a 12 blocchi con 2-colorazione slime/honey, centroidi dei gruppi per i numeri identificativi).
+- `js/SceneTools.js` — setup scena/camere Three.js, rendering dei voxel (palette fissa per gruppo allo stage 4, 2 colori materiale allo stage 5), numeri identificativi dei gruppi proiettati sulle viste laterali.
+- `main.js` — orchestratore: genera il geoide da un seed secondo le impostazioni correnti, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-5 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info, `m` per il menu impostazioni) e il menu impostazioni stesso (`setupSettingsMenu()`).
 
 ## Prossimo passo
 
