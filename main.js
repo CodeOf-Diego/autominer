@@ -7,11 +7,13 @@ let pipeline = null
 let currentStage = 5
 
 /**
- * Step 8: layer-by-layer view. When enabled, renderStage() draws only the single world-Y slice
- * `y` (of whichever stage is current) instead of the whole thing - so a build can be followed
- * and verified in Minecraft one horizontal layer at a time, the way players actually build.
+ * Step 8: layer-by-layer view. When enabled, renderStage() draws only up to the single world-Y
+ * slice `y` (of whichever stage is current), fading the layers below it instead of hiding them -
+ * so a build can be followed and verified in Minecraft one horizontal layer at a time, the way
+ * players actually build, while still seeing what's already been placed underneath. `y: null`
+ * means "not positioned yet" - renderStage() sets it to the first occupied layer on first use.
  */
-let layerView = { enabled: false, y: 0 }
+let layerView = { enabled: false, y: null }
 
 /** Generation/layout settings, editable from the settings menu (index.html + setupSettingsMenu() below) */
 let settings = {
@@ -142,9 +144,39 @@ function renderStage(stage) {
 	let displaySize = { x: display.maxX(), y: display.maxY(), z: display.maxZ() }
 	let originalSize = { x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() }
 
-	// clamp the layer to whatever this stage's display actually spans, so switching stage/axis
-	// visibility never leaves it pointing past the top (or stuck on a now-nonexistent slice)
-	if (layerView.y >= displaySize.y) layerView.y = Math.max(0, displaySize.y - 1)
+	// stage 6's machine blocks aren't part of `display` (addMachinesToScene draws them
+	// separately), so they're computed up front here: once to feed the layer view's occupied
+	// range below, once to actually draw them further down
+	let machineBlocksByAxis = null
+	if (stage === 6) {
+		let shift = {
+			x: settings.invert.x ? settings.gap + 1 : 0,
+			y: settings.invert.y ? settings.gap + 1 : 0,
+			z: settings.invert.z ? settings.gap + 1 : 0,
+		}
+		machineBlocksByAxis = {}
+		for (let axis of ['x','y','z']) {
+			if (!settings.show[axis]) continue
+			machineBlocksByAxis[axis] = computeMachineBlocks(pipeline.data_layers[axis], axis, originalSize, settings.gap, settings.invert, shift)
+		}
+	}
+
+	// bounds the layer view to where this stage actually has something to show (first occupied
+	// layer to last), instead of the whole mostly-empty display bounding box
+	let occupied = ST.occupiedYRange(display) || { min: 0, max: displaySize.y - 1 }
+	if (machineBlocksByAxis) {
+		for (let axis in machineBlocksByAxis) {
+			for (let b of machineBlocksByAxis[axis]) {
+				if (b.y < occupied.min) occupied.min = b.y
+				if (b.y > occupied.max) occupied.max = b.y
+			}
+		}
+	}
+	if (layerView.enabled) {
+		layerView.y = layerView.y === null
+			? occupied.min
+			: Math.max(occupied.min, Math.min(occupied.max, layerView.y))
+	}
 	let layerY = layerView.enabled ? layerView.y : null
 
 	ST.addMeshToScene(display, layerY)
@@ -157,22 +189,15 @@ function renderStage(stage) {
 	}
 
 	// stage 6: one flying machine per final group, pushing into the geode along its axis
-	if (stage === 6) {
-		let shift = {
-			x: settings.invert.x ? settings.gap + 1 : 0,
-			y: settings.invert.y ? settings.gap + 1 : 0,
-			z: settings.invert.z ? settings.gap + 1 : 0,
-		}
-		for (let axis of ['x','y','z']) {
-			if (!settings.show[axis]) continue
-			let blocks = computeMachineBlocks(pipeline.data_layers[axis], axis, originalSize, settings.gap, settings.invert, shift)
-			ST.addMachinesToScene(blocks, displaySize, layerY)
+	if (machineBlocksByAxis) {
+		for (let axis in machineBlocksByAxis) {
+			ST.addMachinesToScene(machineBlocksByAxis[axis], displaySize, layerY)
 		}
 	}
 
 	if (stage_info) {
 		let label = 'Stage ' + stage + '/6 - ' + STAGE_NAMES[stage] + ' (tasti 1-6 per cambiare)'
-		if (layerView.enabled) label += ' | Layer ' + layerView.y + '/' + (displaySize.y - 1) + ' (freccie su/giù, \'l\' per uscire)'
+		if (layerView.enabled) label += ' | Layer ' + layerView.y + ' [' + occupied.min + '-' + occupied.max + '] (freccie su/giù, \'l\' per uscire)'
 		else label += " ('l' per vista a livelli)"
 		stage_info.innerHTML = label
 	}
@@ -293,7 +318,7 @@ document.addEventListener('keydown', (event) => {
 	}
 	if (layerView.enabled && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
 		event.preventDefault() // don't scroll the page
-		layerView.y = Math.max(0, layerView.y + (event.key === 'ArrowUp' ? 1 : -1))
+		layerView.y += (event.key === 'ArrowUp' ? 1 : -1) // renderStage() clamps this to the occupied range
 		renderStage(currentStage)
 	}
 });

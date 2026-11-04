@@ -55,7 +55,7 @@ Poiché il calcolo sulla griglia attuale impiega pochi millisecondi, non ha sens
 
 Dallo stage 4 in su, ogni gruppo ha anche un numero identificativo (0, 1, 2...) stampato sopra di sé in ciascuna delle 3 viste laterali, assegnato in ordine di id area crescente — utile per riferirsi a un gruppo specifico senza ambiguità.
 
-**Vista a livelli (step 8, tasto `l`)** — mostra un solo livello Y alla volta invece dell'intera scena (geoide + blueprint + macchine), qualunque sia lo stage corrente. Serve a costruire e verificare il risultato in Minecraft un layer orizzontale per volta, come si fa davvero in gioco (utile soprattutto allo stage 6 per controllare che una flying machine funzioni davvero prima di costruire tutto). Frecce su/giù per cambiare livello, `l` di nuovo per tornare alla vista completa.
+**Vista a livelli (step 8, tasto `l`)** — mostra un solo livello Y alla volta invece dell'intera scena (geoide + blueprint + macchine), qualunque sia lo stage corrente. Serve a costruire e verificare il risultato in Minecraft un layer orizzontale per volta, come si fa davvero in gioco (utile soprattutto allo stage 6 per controllare che una flying machine funzioni davvero prima di costruire tutto). Il range dei livelli naviga dal primo all'ultimo che contengono davvero qualcosa (non l'intero bounding box, quasi sempre più grande), e salendo di livello quelli già attraversati restano visibili sotto ma semi-trasparenti, come riferimento di quanto già costruito. Frecce su/giù per cambiare livello, `l` di nuovo per tornare alla vista completa.
 
 Altri tasti: `r` rigenera una nuova vena casuale (con le impostazioni correnti), `e` copia vena+seed negli appunti (vedi sotto), `i` mostra/nasconde il pannello di debug, `m` mostra/nasconde il menu impostazioni.
 

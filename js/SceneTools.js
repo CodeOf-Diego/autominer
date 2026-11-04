@@ -30,10 +30,10 @@ function uniformMaterial(name, opacity) {
     return MATERIAL_CACHE[key]
 }
 /** Different texture on top/bottom vs the 4 sides (e.g. honey block) */
-function topBottomSideMaterial(topName, bottomName, sideName) {
-    let key = 'tbs:' + topName + ':' + bottomName + ':' + sideName
+function topBottomSideMaterial(topName, bottomName, sideName, opacity) {
+    let key = 'tbs:' + topName + ':' + bottomName + ':' + sideName + ':' + (opacity||1)
     if (MATERIAL_CACHE[key] === undefined) {
-        let side = uniformMaterial(sideName), top = uniformMaterial(topName), bottom = uniformMaterial(bottomName)
+        let side = uniformMaterial(sideName, opacity), top = uniformMaterial(topName, opacity), bottom = uniformMaterial(bottomName, opacity)
         // BoxGeometry face material order: +X, -X, +Y(top), -Y(bottom), +Z, -Z
         MATERIAL_CACHE[key] = [side, side, top, bottom, side, side]
     }
@@ -44,10 +44,10 @@ function topBottomSideMaterial(topName, bottomName, sideName) {
  * opposite face, and the 4 remaining sides. dir is a [dx,dy,dz] unit vector (exactly one
  * component is +-1) pointing at the facing face.
  */
-function directionalMaterial(frontName, sideName, backName, dir) {
-    let key = 'dir:' + frontName + ':' + sideName + ':' + backName + ':' + dir.join(',')
+function directionalMaterial(frontName, sideName, backName, dir, opacity) {
+    let key = 'dir:' + frontName + ':' + sideName + ':' + backName + ':' + dir.join(',') + ':' + (opacity||1)
     if (MATERIAL_CACHE[key] === undefined) {
-        let front = uniformMaterial(frontName), side = uniformMaterial(sideName), back = uniformMaterial(backName)
+        let front = uniformMaterial(frontName, opacity), side = uniformMaterial(sideName, opacity), back = uniformMaterial(backName, opacity)
         let mats = [side, side, side, side, side, side] // +X,-X,+Y,-Y,+Z,-Z
         if (dir[0] === 1) { mats[0] = front; mats[1] = back }
         else if (dir[0] === -1) { mats[1] = front; mats[0] = back }
@@ -58,6 +58,25 @@ function directionalMaterial(frontName, sideName, backName, dir) {
         MATERIAL_CACHE[key] = mats
     }
     return MATERIAL_CACHE[key]
+}
+/** Flat color material (debug markers, group palette), cached the same way as the textured ones */
+function flatMaterial(color, opacity) {
+    let key = 'flat:' + color + ':' + (opacity||1)
+    if (MATERIAL_CACHE[key] === undefined) {
+        MATERIAL_CACHE[key] = new THREE.MeshBasicMaterial({ color, transparent: !!opacity, opacity: opacity||1 })
+    }
+    return MATERIAL_CACHE[key]
+}
+/** Opacity used to still draw, but fade out, the layers below the current one in the layer view (main.js's layerView) */
+const GHOST_OPACITY = 0.25
+/**
+ * Which voxel/plain/material/group cell values addMeshToScene() actually draws a mesh for (see
+ * its materialForVoxel()). Kept separate so occupiedYRange() can find where a display's content
+ * actually starts/ends without building real materials for every cell.
+ */
+function isRenderableCell(cell) {
+    if (typeof cell === 'number' && (cell >= MATERIAL_ID_OFFSET || cell >= GROUP_ID_OFFSET)) return true
+    return [Voxels.AMETHIST, Voxels.SLIME_BLOCK, Voxels.HONEY_BLOCK, Plains.ADJACENT, Plains.SUPPORT, Voxels.BLU, Voxels.RED].includes(cell)
 }
 
 class SceneTools {
@@ -138,26 +157,31 @@ class SceneTools {
 
 
 	
-	/** layerY: when set (see main.js's layerView), draws only the cells at that world Y instead of the whole vein/blueprint */
+	/**
+	 * layerY: when set (see main.js's layerView), draws only cells at or below that world Y
+	 * instead of the whole vein/blueprint - the current layer (i.y === layerY) at full opacity,
+	 * everything below it (already "built") faded with GHOST_OPACITY as a visual reference,
+	 * anything above it left out entirely since it hasn't been reached yet.
+	 */
 	addMeshToScene(vein, layerY) {
 		const matrixSize = { x: vein.maxX(), y: vein.maxY(), z: vein.maxZ() };
-	
+
 		// Define the size of each voxel
 		let voxelSize = 1;
-	  
+
 		// Create a new Three.js voxel geometry
 		let  voxelGeometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
-	  
-		// Create a new Three.js voxel material
-		let voxelMaterial = []
-		voxelMaterial[Voxels.AMETHIST] = uniformMaterial('amethyst_block');
-		voxelMaterial[Voxels.SLIME_BLOCK] = uniformMaterial('slime_block');
-		voxelMaterial[Voxels.HONEY_BLOCK] = topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side');
-	
-		voxelMaterial[Plains.ADJACENT] = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-		voxelMaterial[Plains.SUPPORT] = new THREE.MeshBasicMaterial({ color: 0xffbb00 });
-		voxelMaterial[Voxels.BLU] = new THREE.MeshBasicMaterial({ color: 0x0000ff });
-		voxelMaterial[Voxels.RED] = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+		function materialForVoxel(cell, opacity) {
+			if (cell === Voxels.AMETHIST) return uniformMaterial('amethyst_block', opacity)
+			if (cell === Voxels.SLIME_BLOCK) return uniformMaterial('slime_block', opacity)
+			if (cell === Voxels.HONEY_BLOCK) return topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side', opacity)
+			if (cell === Plains.ADJACENT) return flatMaterial(0xffff00, opacity)
+			if (cell === Plains.SUPPORT) return flatMaterial(0xffbb00, opacity)
+			if (cell === Voxels.BLU) return flatMaterial(0x0000ff, opacity)
+			if (cell === Voxels.RED) return flatMaterial(0xff0000, opacity)
+			return undefined
+		}
 
 		// Cells >= GROUP_ID_OFFSET (see BuildingTools.js) are a final group id rather than a
 		// voxel/plain type. Fixed palette instead of a computed hue: a formula can place two
@@ -166,21 +190,20 @@ class SceneTools {
 		// ids don't land next to each other in the cycle, and stay well clear of the fixed red
 		// debug marker and the magenta/purple amethyst color.
 		const GROUP_PALETTE = [0x2563eb, 0x16a34a, 0xf59e0b, 0x7c3aed, 0x06b6d4, 0xca8a04, 0x0d9488, 0x6366f1]
-		let groupColorCache = {}
-		function materialForGroup(groupId) {
-			if (groupColorCache[groupId] === undefined) {
-				let color = GROUP_PALETTE[Object.keys(groupColorCache).length % GROUP_PALETTE.length]
-				groupColorCache[groupId] = new THREE.MeshBasicMaterial({ color })
+		let groupColorAssigned = {}
+		function materialForGroup(groupId, opacity) {
+			if (groupColorAssigned[groupId] === undefined) {
+				groupColorAssigned[groupId] = GROUP_PALETTE[Object.keys(groupColorAssigned).length % GROUP_PALETTE.length]
 			}
-			return groupColorCache[groupId]
+			return flatMaterial(groupColorAssigned[groupId], opacity)
 		}
 
 		// Cells >= MATERIAL_ID_OFFSET (see BuildingTools.js) are the 2-color slime/honey view:
 		// real slime/honey textures, material 0 = slime, material 1 = honey.
-		function materialForMaterial(matId) {
+		function materialForMaterial(matId, opacity) {
 			return matId === 1
-				? topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side')
-				: uniformMaterial('slime_block')
+				? topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side', opacity)
+				: uniformMaterial('slime_block', opacity)
 		}
 
 		// Create a new Three.js voxel mesh array
@@ -188,12 +211,13 @@ class SceneTools {
 
 		// Loop through the matrix and create a voxel mesh for each cell
 		vein.loop((i)=> {
-			if (layerY !== null && layerY !== undefined && i.y !== layerY) return
+			if (layerY !== null && layerY !== undefined && i.y > layerY) return
+			let opacity = (layerY !== null && layerY !== undefined && i.y < layerY) ? GHOST_OPACITY : undefined
 			let cell = vein.GET()
 			let material
-			if (typeof cell === 'number' && cell >= MATERIAL_ID_OFFSET) material = materialForMaterial(cell - MATERIAL_ID_OFFSET)
-			else if (typeof cell === 'number' && cell >= GROUP_ID_OFFSET) material = materialForGroup(cell)
-			else material = voxelMaterial[cell]
+			if (typeof cell === 'number' && cell >= MATERIAL_ID_OFFSET) material = materialForMaterial(cell - MATERIAL_ID_OFFSET, opacity)
+			else if (typeof cell === 'number' && cell >= GROUP_ID_OFFSET) material = materialForGroup(cell, opacity)
+			else material = materialForVoxel(cell, opacity)
 			if (material !== undefined) {
 				let voxelMesh = new THREE.Mesh(voxelGeometry, material);
 				voxelMesh.position.set(
@@ -208,6 +232,22 @@ class SceneTools {
 	}
 
 	/**
+	 * Scans a Matrix3D for the range of world-Y indices that contain at least one cell
+	 * addMeshToScene() would actually draw (see isRenderableCell above). Used to bound the layer
+	 * view (main.js's layerView) to the part of the display that has something in it, instead of
+	 * its whole (mostly empty) bounding box. Returns null if nothing in it is renderable.
+	 */
+	occupiedYRange(matrix) {
+		let min = null, max = null
+		matrix.loop((i) => {
+			if (!isRenderableCell(matrix.GET())) return
+			if (min === null || i.y < min) min = i.y
+			if (max === null || i.y > max) max = i.y
+		})
+		return min === null ? null : { min, max }
+	}
+
+	/**
 	 * Renders a list of MachineTools.computeMachineBlocks() blocks with real textures, oriented
 	 * correctly for pistons/observers, using the same centering convention as addMeshToScene()
 	 * so they line up with it. layerY: when set (see main.js's layerView), draws only the blocks
@@ -216,7 +256,8 @@ class SceneTools {
 	addMachinesToScene(machineBlocks, displaySize, layerY) {
 		const voxelSize = 1;
 		let voxelGeometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
-		if (layerY !== null && layerY !== undefined) machineBlocks = machineBlocks.filter((b) => b.y === layerY);
+		// same cutoff/ghost rule as addMeshToScene(): keep y <= layerY, fade y < layerY
+		if (layerY !== null && layerY !== undefined) machineBlocks = machineBlocks.filter((b) => b.y <= layerY);
 
 		// converts a template-local facing ('along'/'-along'/'up'/'-up') into a world [dx,dy,dz]
 		function facingToWorldDir(b) {
@@ -229,15 +270,16 @@ class SceneTools {
 		}
 
 		machineBlocks.forEach((b) => {
+			let opacity = (layerY !== null && layerY !== undefined && b.y < layerY) ? GHOST_OPACITY : undefined
 			let material;
-			if (b.type === 'obsidian') material = uniformMaterial('obsidian');
-			else if (b.type === 'lamp') material = uniformMaterial('redstone_lamp');
-			else if (b.type === 'note') material = uniformMaterial('note_block');
-			else if (b.type === 'piston') material = directionalMaterial('piston_top_sticky', 'piston_side', 'piston_bottom', facingToWorldDir(b));
-			else if (b.type === 'observer') material = directionalMaterial('observer_front', 'observer_side', 'observer_back', facingToWorldDir(b));
+			if (b.type === 'obsidian') material = uniformMaterial('obsidian', opacity);
+			else if (b.type === 'lamp') material = uniformMaterial('redstone_lamp', opacity);
+			else if (b.type === 'note') material = uniformMaterial('note_block', opacity);
+			else if (b.type === 'piston') material = directionalMaterial('piston_top_sticky', 'piston_side', 'piston_bottom', facingToWorldDir(b), opacity);
+			else if (b.type === 'observer') material = directionalMaterial('observer_front', 'observer_side', 'observer_back', facingToWorldDir(b), opacity);
 			else material = b.materialIndex === 1 // 'opposite' or 'slime' cell -> the resolved slime/honey material
-				? topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side')
-				: uniformMaterial('slime_block');
+				? topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side', opacity)
+				: uniformMaterial('slime_block', opacity);
 
 			let mesh = new THREE.Mesh(voxelGeometry, material);
 			mesh.position.set(
