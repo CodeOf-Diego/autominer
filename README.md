@@ -6,8 +6,15 @@ Il progetto nasce ispirato al mod [Geodesy](https://github.com/kosmolot-mods/geo
 
 ## Pipeline prevista
 
+0. **Ricostruzione da foto** *(in corso, stage 1 nell'app)*
+   L'idea: partire da uno screenshot Minecraft reale di una geode e ricostruire la posizione 3D dei blocchi di ametista, così lo step 1 non deve più generare un geoide casuale ma può lavorare su dati reali. Primo pezzo (calibrazione della camera - angolazione, FOV, posizione) in corso:
+   1. **Rilevamento linee** (`js/CalibrationTools.js::detectLines`) — Canny + Hough probabilistico via [OpenCV.js](https://docs.opencv.org/4.9.0/opencv.js) (CDN, ~10MB, caricato async), su una versione ridotta dell'immagine (smorza il rumore di texture fine mantenendo gli spigoli strutturali lunghi). Visibile allo **stage 1**.
+   2. **Punti di fuga** (`findVanishingPoints`) — clustering RANSAC-like delle intersezioni a coppie di linee (accelerato con una griglia spaziale), rifinito con intersezione ai minimi quadrati. *Non ancora collegato allo stage 1* - vedi sotto.
+   3. **Calibrazione** (`calibrateFromPair`) — dalla condizione di ortogonalità tra 2 punti di fuga si ricava la focale (quindi FOV) e l'orientamento della camera. **Validata**: un test sintetico con camera nota (f=500px) la recupera esatta.
+   **Stato reale:** sul primo screenshot provato (`reference/screenshots/geode-01.png`) il rilevamento automatico non converge a una coppia di punti di fuga ortogonale valida, nemmeno dopo aver ridotto la risoluzione e stretto i filtri — i cristalli di ametista non sono cubi (bordi irregolari) e il pavimento di calcite è molto rumoroso, quindi non ci sono abbastanza spigoli lunghi e puliti allineati alla griglia in quella foto. Prossimo tentativo probabile: click manuale su 4-6 angoli riconoscibili invece del rilevamento automatico. C'è anche un prototipo standalone separato (`camera-calibration.html`, slider interattivi per i parametri Canny/Hough) usato per questi test, indipendente dall'app principale.
+
 1. **Geoide** — mappa 3D del filone di ametista.
-   Oggi viene generato casualmente ad ogni refresh della pagina, solo per avere dati di demo. In futuro andrà sostituito con un geoide reale e persistito.
+   Oggi viene generato casualmente ad ogni refresh della pagina, solo per avere dati di demo. In futuro andrà sostituito con un geoide reale (vedi step 0) e persistito.
 
 2. **Perimetro e supporti per asse** *(completo su tutti e 3 gli assi)*
    Per ciascuno dei 3 assi: appiattisce il volume in un piano 2D, trova le celle d'aria adiacenti all'ametista ("confini stretti"), individua le aree isolate, scarta quelle troppo piccole o senza un percorso a L percorribile, poi fonde i confini stretti vicini in strutture contigue più larghe aggiungendo blocchi di supporto ("confini larghi").
@@ -20,8 +27,8 @@ Il progetto nasce ispirato al mod [Geodesy](https://github.com/kosmolot-mods/geo
    La randomicità è **deterministica**: ogni esecuzione usa un PRNG seedato (`makePRNG` in `Tools.js`), quindi stesso seed ⇒ stesso risultato (vena + raggruppamento), seed diverso ⇒ risultato diverso.
    **Limite noto:** se un singolo confine stretto (prima di qualsiasi fusione) è già oltre 12 blocchi da solo, oggi **non viene spezzato** — resta sovradimensionato e viene segnalato in `data_layers.support.oversizedAreas` (+ `console.warn`). Spezzare un'area contigua troppo grande in più chunk da ≤12 è un problema a sé, ancora da affrontare.
 
-3. **Struttura delle 3 macchine** *(prima versione fatta, step 6 — vedi sotto)*
-   Dal perimetro/supporti di ciascun asse, generare la struttura fisica della macchina che scava su quell'asse. Implementato come **stage 6** nell'app: una flying machine per ogni gruppo finale, usando il design esatto del mod Geodesy (`js/MachineTools.js`, `MACHINE_TEMPLATE` trascritto dalle chiamate `setBlock()` reali di `GeodesyCore.java::buildMachine()`, verificate riga per riga sul sorgente — struttura lineare da 20 blocchi, 9×3×1 più un gap d'aria, non ad L: la L richiesta dal solver è sulla *forma del gruppo* da spingere, non sulla macchina stessa).
+3. **Struttura delle 3 macchine** *(prima versione fatta, step 7 — vedi sotto)*
+   Dal perimetro/supporti di ciascun asse, generare la struttura fisica della macchina che scava su quell'asse. Implementato come **stage 7** nell'app: una flying machine per ogni gruppo finale, usando il design esatto del mod Geodesy (`js/MachineTools.js`, `MACHINE_TEMPLATE` trascritto dalle chiamate `setBlock()` reali di `GeodesyCore.java::buildMachine()`, verificate riga per riga sul sorgente — struttura lineare da 20 blocchi, 9×3×1 più un gap d'aria, non ad L: la L richiesta dal solver è sulla *forma del gruppo* da spingere, non sulla macchina stessa).
    **Requisito "asse swappabile":** *fatto* — i checkbox "Inverti asse" nel menu impostazioni decidono su quale lato del geoide si costruisce il blueprint/la macchina di quell'asse.
    **Requisito "sistema di ritorno":** *risolto concettualmente* — la macchina è ancorata tra due blocchi di obsidian fissi (non si sposta fisicamente nel mondo): quello lato geoide è separato dal primo pistone da **un blocco d'aria** (il mod cancella lì il marker del giocatore), lo spazio in cui quel pistone deve estendersi per funzionare — senza quel gap sarebbe incollato all'ossidiana e non potrebbe mai spingere. Il meccanismo redstone esatto che fa scattare i pistoni in sequenza non è stato tracciato nel dettaglio, solo il layout statico dei blocchi.
    **Limite noto:** le macchine di gruppi vicini non vengono controllate per sovrapposizioni — possono compenetrarsi visivamente. Non ancora affrontato.
@@ -46,16 +53,17 @@ Il progetto nasce ispirato al mod [Geodesy](https://github.com/kosmolot-mods/geo
 
 Poiché il calcolo sulla griglia attuale impiega pochi millisecondi, non ha senso un'animazione automatica step-by-step: la pagina mostra sempre di default il risultato finale. È però possibile ispezionare manualmente ogni fase con i tasti numerici:
 
-- **1** — Geoide (solo ametista)
-- **2** — Confini stretti (celle adiacenti all'ametista, non ancora filtrate)
-- **3** — Confini validi (dopo lo scarto delle aree troppo piccole o senza percorso a L)
-- **4** — Raggruppamenti finali da max 12 blocchi, ogni gruppo con un colore diverso (palette fissa di 8 colori, non calcolata — evita che due gruppi vicini ricevano tonalità troppo simili)
-- **5** *(default)* — Materiali: lo stesso raggruppamento ridotto ai soli 2 colori slime (verde) / honey (giallo)
-- **6** — Flying machines: una macchina (design Geodesy, 19 blocchi) per ogni gruppo finale, ancorata al suo centroide ed estesa verso l'esterno lungo l'asse
+- **1** — Foto + linee rilevate (step 0, ricostruzione da foto - vedi sopra): lo screenshot di riferimento con sopra i segmenti trovati da Canny+Hough, per seguire visivamente quanto bene il rilevamento sta andando
+- **2** — Geoide (solo ametista)
+- **3** — Confini stretti (celle adiacenti all'ametista, non ancora filtrate)
+- **4** — Confini validi (dopo lo scarto delle aree troppo piccole o senza percorso a L)
+- **5** — Raggruppamenti finali da max 12 blocchi, ogni gruppo con un colore diverso (palette fissa di 8 colori, non calcolata — evita che due gruppi vicini ricevano tonalità troppo simili)
+- **6** *(default)* — Materiali: lo stesso raggruppamento ridotto ai soli 2 colori slime (verde) / honey (giallo)
+- **7** — Flying machines: una macchina (design Geodesy, 19 blocchi + gap) per ogni gruppo finale, ancorata al suo centroide ed estesa verso l'esterno lungo l'asse
 
-Dallo stage 4 in su, ogni gruppo ha anche un numero identificativo (0, 1, 2...) stampato sopra di sé in ciascuna delle 3 viste laterali, assegnato in ordine di id area crescente — utile per riferirsi a un gruppo specifico senza ambiguità.
+Stage 1 sostituisce la scena 3D con un canvas 2D (foto + overlay linee); tutti gli altri stage usano la scena Three.js come sempre. Dallo stage 5 in su, ogni gruppo ha anche un numero identificativo (0, 1, 2...) stampato sopra di sé in ciascuna delle 3 viste laterali, assegnato in ordine di id area crescente — utile per riferirsi a un gruppo specifico senza ambiguità.
 
-**Vista a livelli (step 8, tasto `l`)** — mostra un solo livello Y alla volta invece dell'intera scena (geoide + blueprint + macchine), qualunque sia lo stage corrente. Serve a costruire e verificare il risultato in Minecraft un layer orizzontale per volta, come si fa davvero in gioco (utile soprattutto allo stage 6 per controllare che una flying machine funzioni davvero prima di costruire tutto). Il range dei livelli naviga dal primo all'ultimo che contengono davvero qualcosa (non l'intero bounding box, quasi sempre più grande), e salendo di livello quelli già attraversati restano visibili sotto ma semi-trasparenti, come riferimento di quanto già costruito. Frecce su/giù per cambiare livello, `l` di nuovo per tornare alla vista completa.
+**Vista a livelli (step 8, tasto `l`)** — mostra un solo livello Y alla volta invece dell'intera scena (geoide + blueprint + macchine), per gli stage 2-7 (non si applica allo stage 1, che è 2D). Serve a costruire e verificare il risultato in Minecraft un layer orizzontale per volta, come si fa davvero in gioco (utile soprattutto allo stage 7 per controllare che una flying machine funzioni davvero prima di costruire tutto). Il range dei livelli naviga dal primo all'ultimo che contengono davvero qualcosa (non l'intero bounding box, quasi sempre più grande), e salendo di livello quelli già attraversati restano visibili sotto ma semi-trasparenti, come riferimento di quanto già costruito. Frecce su/giù per cambiare livello, `l` di nuovo per tornare alla vista completa.
 
 Altri tasti: `r` rigenera una nuova vena casuale (con le impostazioni correnti), `e` copia vena+seed negli appunti (vedi sotto), `i` mostra/nasconde il pannello di debug, `m` mostra/nasconde il menu impostazioni.
 
@@ -67,10 +75,11 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 
 ## Stato attuale
 
-- Step 1 (geoide random, seedato), step 2 (tutti e 3 gli assi) e una prima versione dello step 3 (flying machines, stage 6) funzionanti. Vista a stage 1-6, più vista a livelli (step 8, tasto `l`) per ispezionare/costruire un singolo livello Y alla volta.
-- Rendering con Three.js: camera principale + 3 camere ortogonali (una per asse) per vedere il risultato da più angolazioni contemporaneamente.
-- Nessun build step: file JS separati caricati direttamente in `index.html`, niente bundler.
+- Step 1 (geoide random, seedato), step 2 (tutti e 3 gli assi) e una prima versione dello step 3 (flying machines, stage 7) funzionanti. Step 0 (ricostruzione da foto) in corso: rilevamento linee ok, calibrazione camera validata ma non ancora convergente sulla foto reale di test. Vista a stage 1-7, più vista a livelli (step 8, tasto `l`, stage 2-7) per ispezionare/costruire un singolo livello Y alla volta.
+- Rendering con Three.js (stage 2-7): camera principale + 3 camere ortogonali (una per asse) per vedere il risultato da più angolazioni contemporaneamente. Stage 1 usa invece un canvas 2D separato (foto + linee rilevate).
+- Nessun build step: file JS separati caricati direttamente in `index.html`, niente bundler. Unica eccezione: OpenCV.js (per lo stage 1) caricato da CDN, non vendorizzato nel repo.
 - Pagina di riferimento a parte (`flying-machine-templates.html`, aprila direttamente nel browser): modelli 3D esplorabili dei meccanismi a pistoni, utile per verificare visivamente i design prima di fidarsene.
+- Altra pagina a parte (`camera-calibration.html`): sandbox per tarare interattivamente i parametri di rilevamento linee (Canny/Hough) su una foto, usata per lo sviluppo dello step 0.
 
 ## Struttura del codice
 
@@ -79,9 +88,10 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 - `js/Tools.js` — generazione del geoide casuale (seedata) + PRNG deterministico (`makePRNG`), formato compatto delle vene (`veinToSparse`/`veinFromSparse`/`veinFromExport`).
 - `js/BuildingTools.js` — tutta la logica dello step 2 (perimetro, aree, supporti, raggruppamento a 12 blocchi con 2-colorazione slime/honey, centroidi dei gruppi per i numeri identificativi).
 - `js/MachineTools.js` — step 3: `MACHINE_TEMPLATE` (design Geodesy) e `computeMachineBlocks()`, che lo posiziona per ogni gruppo finale.
-- `js/SceneTools.js` — setup scena/camere Three.js, rendering dei voxel (palette fissa per gruppo allo stage 4, 2 colori materiale allo stage 5, blocchi macchina allo stage 6), numeri identificativi dei gruppi proiettati sulle viste laterali.
-- `main.js` — orchestratore: genera il geoide da un seed secondo le impostazioni correnti, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-6 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info, `m` per il menu impostazioni, `l` + frecce su/giù per la vista a livelli) e il menu impostazioni stesso (`setupSettingsMenu()`).
+- `js/CalibrationTools.js` — step 0: rilevamento linee (`detectLines`, Canny+Hough via OpenCV.js) e la matematica di calibrazione camera (`findVanishingPoints`, `calibrateFromPair`) — quest'ultima non ancora collegata allo stage 1, vedi sopra.
+- `js/SceneTools.js` — setup scena/camere Three.js, rendering dei voxel (palette fissa per gruppo allo stage 5, 2 colori materiale allo stage 6, blocchi macchina allo stage 7), numeri identificativi dei gruppi proiettati sulle viste laterali, toggle scena 3D on/off (`set3DVisible`) per lo stage 1.
+- `main.js` — orchestratore: genera il geoide da un seed secondo le impostazioni correnti, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-7 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info, `m` per il menu impostazioni, `l` + frecce su/giù per la vista a livelli) e il menu impostazioni stesso (`setupSettingsMenu()`).
 
 ## Prossimo passo
 
-Risolvere la sovrapposizione tra macchine di gruppi vicini (step 3), poi proseguire con lo step 4 (struttura dei blocchi di slime come dato a sé, non solo visualizzazione) e lo step 5 (pistoni veri, collegamento redstone tra le macchine).
+Step 0: probabilmente passare al click manuale per la calibrazione camera (il rilevamento automatico non converge sulla foto di test). Poi: risolvere la sovrapposizione tra macchine di gruppi vicini (step 3), proseguire con lo step 4 (struttura dei blocchi di slime come dato a sé, non solo visualizzazione) e lo step 5 (pistoni veri, collegamento redstone tra le macchine).

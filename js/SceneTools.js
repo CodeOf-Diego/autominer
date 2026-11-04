@@ -129,6 +129,7 @@ class SceneTools {
 		let zoom = ST.H/30
 		// what plane each orthogonal camera looks at, since it's not obvious from the viewport alone
 		let planeNames = { x: 'XY', y: 'XZ', z: 'YZ' }
+		ST.viewportLabelEls = []
 			ST.axes.forEach((axis,pos)=> {
 			ST.Ocamera[axis] = new THREE.OrthographicCamera(
 				ST.Worth / zoom, ST.Worth / -zoom,
@@ -151,7 +152,18 @@ class SceneTools {
 			label.style.transform = 'translateY(-50%)'
 			label.style.pointerEvents = 'none'
 			document.body.appendChild(label)
+			ST.viewportLabelEls.push(label)
 		})
+	}
+
+	/**
+	 * Toggles the 3D scene (renderer canvas + the XY/XZ/YZ viewport labels) on/off - used by
+	 * main.js's stage 1 (photo + detected lines), which shows a 2D view in #calibration_view
+	 * instead. Group labels are handled separately via clearGroupLabels().
+	 */
+	set3DVisible(visible) {
+		ST.renderer.domElement.style.display = visible ? '' : 'none'
+		ST.viewportLabelEls.forEach((el) => el.style.display = visible ? '' : 'none')
 	}
 
 

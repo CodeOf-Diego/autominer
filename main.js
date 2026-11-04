@@ -4,7 +4,11 @@ var d={}
 
 /** Holds the last computed vein + per-axis data, so renderStage() can redraw any stage without recomputing */
 let pipeline = null
-let currentStage = 5
+let currentStage = 6
+
+/** Stage 1's source photo (see js/CalibrationTools.js) and its cached line-detection result, so switching away and back doesn't rerun Canny/Hough */
+let calibrationImage = new Image()
+let calibrationResult = null
 
 /**
  * Step 8: layer-by-layer view. When enabled, renderStage() draws only up to the single world-Y
@@ -26,13 +30,15 @@ let settings = {
 }
 
 const STAGE_NAMES = {
-	1: 'Geoide',
-	2: 'Confini stretti',
-	3: 'Confini validi',
-	4: 'Raggruppamenti (max 12 blocchi)',
-	5: 'Materiali (slime/honey)',
-	6: 'Flying machines (una per gruppo)',
+	1: 'Foto + linee rilevate',
+	2: 'Geoide',
+	3: 'Confini stretti',
+	4: 'Confini validi',
+	5: 'Raggruppamenti (max 12 blocchi)',
+	6: 'Materiali (slime/honey)',
+	7: 'Flying machines (una per gruppo)',
 }
+const LAST_STAGE = 7
 
 /**
  * Starting from a passed vein, runs the full step-2 pipeline (perimeter, valid areas,
@@ -121,21 +127,72 @@ function exportVein() {
 	})
 }
 
-/** Renders one stage of the pipeline (1-6) from the already computed snapshots */
+/**
+ * Stage 1: shows calibrationImage with its detected line segments (see js/CalibrationTools.js)
+ * instead of the 3D scene. Runs detection once per image and caches it in calibrationResult.
+ */
+function renderCalibrationStage() {
+	ST.set3DVisible(false)
+	ST.clearGroupLabels()
+	calibration_view.style.display = 'block'
+
+	let canvas = calibration_canvas
+	let draw = () => {
+		canvas.width = calibrationImage.naturalWidth
+		canvas.height = calibrationImage.naturalHeight
+		let ctx = canvas.getContext('2d')
+		ctx.drawImage(calibrationImage, 0, 0)
+		ctx.lineWidth = 2
+		ctx.strokeStyle = '#4ade80'
+		for (let s of calibrationResult.segments) {
+			ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke()
+		}
+	}
+
+	if (stage_info) stage_info.innerHTML = 'Stage 1/' + LAST_STAGE + ' - ' + STAGE_NAMES[1] + ' (tasti 1-' + LAST_STAGE + ' per cambiare)'
+
+	if (!calibrationImage.complete || calibrationImage.naturalWidth === 0) {
+		if (stage_info) stage_info.innerHTML += ' | caricamento foto...'
+		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 200)
+		return
+	}
+	if (!cvReady) {
+		if (stage_info) stage_info.innerHTML += ' | caricamento OpenCV.js...'
+		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 500)
+		return
+	}
+	if (calibrationResult === null) {
+		calibrationResult = { segments: detectLines(calibrationImage) }
+	}
+	draw()
+	if (stage_info) stage_info.innerHTML += ' | ' + calibrationResult.segments.length + ' segmenti rilevati'
+}
+
+/** Renders one stage of the pipeline (1-7; stage 1 is the photo/line-detection view, see above) from the already computed snapshots */
 function renderStage(stage) {
 	if (pipeline === null) return
 	currentStage = stage
+
+	if (stage === 1) {
+		renderCalibrationStage()
+		return
+	}
+	calibration_view.style.display = 'none'
+	ST.set3DVisible(true)
 	ST.clearScene()
 
+	// stages 2-7 are the original pipeline's stages 1-6, shifted by 1 to make room for stage 1
+	let pipelineStage = stage - 1
+
 	let display
-	if (stage === 1) {
+	if (pipelineStage === 1) {
 		display = pipeline.vein.clone()
 	} else {
 		let snapshots = {}
 		for (let axis of ['x','y','z']) {
-			snapshots[axis] = stage === 2 ? pipeline.data_layers[axis].snapshotStretti
-				: stage === 3 ? pipeline.data_layers[axis].snapshotValide
-				: stage === 4 ? pipeline.data_layers[axis].snapshotGruppi
+			snapshots[axis] = pipelineStage === 2 ? pipeline.data_layers[axis].snapshotStretti
+				: pipelineStage === 3 ? pipeline.data_layers[axis].snapshotValide
+				: pipelineStage === 4 ? pipeline.data_layers[axis].snapshotGruppi
 				: pipeline.data_layers[axis].snapshotMateriali // stage 5 and 6 share the materials base
 		}
 		display = Tools3D.buildDisplay(pipeline.vein, snapshots, settings.gap, settings.invert, settings.show)
@@ -144,11 +201,11 @@ function renderStage(stage) {
 	let displaySize = { x: display.maxX(), y: display.maxY(), z: display.maxZ() }
 	let originalSize = { x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() }
 
-	// stage 6's machine blocks aren't part of `display` (addMachinesToScene draws them
+	// stage 7's machine blocks aren't part of `display` (addMachinesToScene draws them
 	// separately), so they're computed up front here: once to feed the layer view's occupied
 	// range below, once to actually draw them further down
 	let machineBlocksByAxis = null
-	if (stage === 6) {
+	if (pipelineStage === 6) {
 		let shift = {
 			x: settings.invert.x ? settings.gap + 1 : 0,
 			y: settings.invert.y ? settings.gap + 1 : 0,
@@ -181,14 +238,14 @@ function renderStage(stage) {
 
 	ST.addMeshToScene(display, layerY)
 
-	// group index numbers only make sense once groups exist (stage 4+)
-	if (stage >= 4) {
+	// group index numbers only make sense once groups exist (pipeline stage 4+)
+	if (pipelineStage >= 4) {
 		ST.updateGroupLabels(pipeline.data_layers, displaySize, originalSize, settings.gap, settings.invert, settings.show)
 	} else {
 		ST.clearGroupLabels()
 	}
 
-	// stage 6: one flying machine per final group, pushing into the geode along its axis
+	// stage 7: one flying machine per final group, pushing into the geode along its axis
 	if (machineBlocksByAxis) {
 		for (let axis in machineBlocksByAxis) {
 			ST.addMachinesToScene(machineBlocksByAxis[axis], displaySize, layerY)
@@ -196,7 +253,7 @@ function renderStage(stage) {
 	}
 
 	if (stage_info) {
-		let label = 'Stage ' + stage + '/6 - ' + STAGE_NAMES[stage] + ' (tasti 1-6 per cambiare)'
+		let label = 'Stage ' + stage + '/' + LAST_STAGE + ' - ' + STAGE_NAMES[stage] + ' (tasti 1-' + LAST_STAGE + ' per cambiare)'
 		if (layerView.enabled) label += ' | Layer ' + layerView.y + ' [' + occupied.min + '-' + occupied.max + '] (freccie su/giù, \'l\' per uscire)'
 		else label += " ('l' per vista a livelli)"
 		stage_info.innerHTML = label
@@ -287,6 +344,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	setupSettingsMenu()
 
 	ST.setUpCameras()
+	calibrationImage.src = 'reference/screenshots/geode-01.png'
 	renderStage(currentStage)
 	ST.animate()
 });
@@ -306,7 +364,7 @@ document.addEventListener('keydown', (event) => {
 	if (event.key === 'm') {
 		settings_menu.style.display = (settings_menu.style.display == 'none') ? 'block' : 'none';
 	}
-	if (['1','2','3','4','5','6'].includes(event.key)) {
+	if (['1','2','3','4','5','6','7'].includes(event.key)) {
 		renderStage(parseInt(event.key))
 	}
 	if (event.key === 'e') {

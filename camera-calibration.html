@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Camera calibration prototype</title>
+<style>
+	body { background: #111; color: #eee; font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
+	h1 { font-size: 18px; margin: 0 0 4px; }
+	p.sub { color: #999; margin: 0 0 16px; font-size: 13px; }
+	.layout { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+	.canvas-wrap { position: relative; border: 1px solid #333; line-height: 0; }
+	canvas { max-width: 100%; display: block; }
+	#overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+	.panel { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 12px 16px; min-width: 300px; }
+	.panel h2 { font-size: 14px; margin: 0 0 8px; color: #bbb; }
+	label { display: block; font-size: 12px; color: #aaa; margin-top: 10px; }
+	input[type=range] { width: 100%; }
+	.val { color: #6cf; font-weight: bold; }
+	button { background: #2563eb; color: white; border: none; border-radius: 4px; padding: 8px 14px; font-size: 13px; cursor: pointer; margin-top: 12px; }
+	button:hover { background: #1d4ed8; }
+	input[type=file] { color: #ccc; font-size: 12px; margin-top: 8px; }
+	table { width: 100%; font-size: 12px; margin-top: 8px; border-collapse: collapse; }
+	td, th { padding: 3px 6px; text-align: left; border-bottom: 1px solid #333; }
+	.result-big { font-size: 22px; font-weight: bold; color: #4ade80; margin: 4px 0; }
+	.status { font-size: 12px; color: #f59e0b; min-height: 16px; }
+	.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Camera calibration prototype</h1>
+<p class="sub">Step 1-3: rilevamento linee (Canny + Hough) &rarr; clustering punti di fuga &rarr; focale/FOV/rotazione. Vedi README.md / autominer per il contesto.</p>
+
+<div class="layout">
+	<div class="canvas-wrap">
+		<canvas id="base"></canvas>
+		<canvas id="overlay"></canvas>
+	</div>
+
+	<div class="panel">
+		<h2>Input</h2>
+		<input type="file" id="file_input" accept="image/*">
+		<label>Dimensione max elaborazione (px): <span class="val" id="maxdim_val"></span></label>
+		<input type="range" id="maxdim" min="400" max="3840" value="1200" step="100">
+		<label>Canny threshold 1: <span class="val" id="canny1_val"></span></label>
+		<input type="range" id="canny1" min="10" max="200" value="50">
+		<label>Canny threshold 2: <span class="val" id="canny2_val"></span></label>
+		<input type="range" id="canny2" min="20" max="400" value="150">
+		<label>Hough threshold (voti minimi): <span class="val" id="hough_thresh_val"></span></label>
+		<input type="range" id="hough_thresh" min="10" max="150" value="40">
+		<label>Hough min line length: <span class="val" id="hough_minlen_val"></span></label>
+		<input type="range" id="hough_minlen" min="5" max="200" value="25">
+		<label>Hough max line gap: <span class="val" id="hough_maxgap_val"></span></label>
+		<input type="range" id="hough_maxgap" min="1" max="50" value="8">
+		<button id="run_btn" disabled>Analizza</button>
+		<div class="status" id="status">Caricamento OpenCV.js...</div>
+	</div>
+
+	<div class="panel">
+		<h2>Punti di fuga candidati</h2>
+		<table id="vp_table"><thead><tr><th>#</th><th>x,y (px)</th><th>score</th><th>membri</th></tr></thead><tbody></tbody></table>
+
+		<h2 style="margin-top:16px">Calibrazione (dalla miglior coppia ortogonale)</h2>
+		<div id="calib_result">-</div>
+	</div>
+</div>
+
+<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
+<script>
+let img = new Image()
+let cvReady = false
+let VP_COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#eab308', '#a855f7', '#06b6d4']
+
+function onOpenCvReady() {
+	cvReady = true
+	status('OpenCV.js pronto.')
+	run_btn.disabled = false
+}
+
+function status(msg) { document.getElementById('status').textContent = msg }
+
+// --- image loading ---
+
+function loadImage(src) {
+	img = new Image()
+	img.onload = () => {
+		let base = document.getElementById('base'), overlay = document.getElementById('overlay')
+		base.width = overlay.width = img.width
+		base.height = overlay.height = img.height
+		overlay.style.width = base.style.width = Math.min(img.width, 1100) + 'px'
+		base.getContext('2d').drawImage(img, 0, 0)
+		status('Immagine caricata: ' + img.width + 'x' + img.height)
+	}
+	img.src = src
+}
+
+document.getElementById('file_input').addEventListener('change', (e) => {
+	let file = e.target.files[0]
+	if (file) loadImage(URL.createObjectURL(file))
+})
+
+// default image: the saved reference screenshot
+loadImage('reference/screenshots/geode-01.png')
+
+// --- slider labels ---
+for (let id of ['maxdim', 'canny1', 'canny2', 'hough_thresh', 'hough_minlen', 'hough_maxgap']) {
+	let slider = document.getElementById(id), label = document.getElementById(id + '_val')
+	label.textContent = slider.value
+	slider.addEventListener('input', () => label.textContent = slider.value)
+}
+
+// --- line geometry helpers ---
+
+/** Normalized homogeneous line (a,b,c) through 2 points, a^2+b^2=1 */
+function lineFromPoints(x1, y1, x2, y2) {
+	let a = y1 - y2, b = x2 - x1, c = x1 * y2 - x2 * y1
+	let norm = Math.sqrt(a * a + b * b)
+	if (norm < 1e-9) return null
+	return { a: a / norm, b: b / norm, c: c / norm }
+}
+
+/** Homogeneous intersection of 2 normalized lines -> {x,y} (finite) or {dx,dy} (at infinity) */
+function intersect(l1, l2) {
+	// cross product of (a,b,c) vectors
+	let x = l1.b * l2.c - l1.c * l2.b
+	let y = l1.c * l2.a - l1.a * l2.c
+	let w = l1.a * l2.b - l1.b * l2.a
+	return { x, y, w }
+}
+
+// --- vanishing point detection (RANSAC-ish pairwise intersection voting) ---
+
+function findVanishingPoints(segments, imgW, imgH) {
+	let diag = Math.sqrt(imgW * imgW + imgH * imgH)
+	let lines = segments.map(s => ({ ...s, geo: lineFromPoints(s.x1, s.y1, s.x2, s.y2) })).filter(s => s.geo)
+
+	// bound the O(n^2) pairwise step: keep only the longest MAX_LINES segments (longer segments
+	// give more reliable directions anyway)
+	const MAX_LINES = 220
+	if (lines.length > MAX_LINES) {
+		lines.sort((a, b) => b.length - a.length)
+		lines = lines.slice(0, MAX_LINES)
+	}
+
+	// pairwise intersections, weighted by segment lengths and how non-parallel the pair is
+	let candidates = []
+	for (let i = 0; i < lines.length; i++) {
+		for (let j = i + 1; j < lines.length; j++) {
+			let li = lines[i], lj = lines[j]
+			let cross = li.geo.a * lj.geo.b - li.geo.b * lj.geo.a // sin of angle between normals
+			if (Math.abs(cross) < 0.05) continue // nearly parallel -> unstable/uninformative intersection
+			let p = intersect(li.geo, lj.geo)
+			if (Math.abs(p.w) < 1e-6) continue // true infinity, skip (vertical VP not needed here)
+			let x = p.x / p.w, y = p.y / p.w
+			if (Math.abs(x) > 30 * diag || Math.abs(y) > 30 * diag) continue // discard wild outliers
+			let weight = Math.min(li.length, lj.length) * Math.abs(cross)
+			candidates.push({ x, y, weight, i, j })
+		}
+	}
+
+	// greedy clustering: repeatedly take the highest-weight remaining candidate, absorb
+	// everything within radius, score the cluster by total consistent line length.
+	// A spatial grid keyed by cell makes the neighbor search near-constant time instead of
+	// O(candidates^2), which matters since `candidates` can be in the tens of thousands.
+	let clusterRadius = diag * 0.04
+	let grid = new Map()
+	let cellOf = (x, y) => Math.round(x / clusterRadius) + ',' + Math.round(y / clusterRadius)
+	candidates.forEach((c, idx) => {
+		let key = cellOf(c.x, c.y)
+		if (!grid.has(key)) grid.set(key, [])
+		grid.get(key).push(idx)
+	})
+
+	let clusters = []
+	let used = new Array(candidates.length).fill(false)
+	let order = candidates.map((c, idx) => idx).sort((a, b) => candidates[b].weight - candidates[a].weight)
+
+	for (let si of order) {
+		if (used[si]) continue
+		let seed = candidates[si]
+		let members = new Set()
+		let sumX = 0, sumY = 0, sumW = 0
+		let gx = Math.round(seed.x / clusterRadius), gy = Math.round(seed.y / clusterRadius)
+		for (let dx = -1; dx <= 1; dx++) {
+			for (let dy = -1; dy <= 1; dy++) {
+				let bucket = grid.get((gx + dx) + ',' + (gy + dy))
+				if (!bucket) continue
+				for (let ci of bucket) {
+					if (used[ci]) continue
+					let c = candidates[ci]
+					let ddx = c.x - seed.x, ddy = c.y - seed.y
+					if (Math.sqrt(ddx * ddx + ddy * ddy) < clusterRadius) {
+						used[ci] = true
+						members.add(c.i); members.add(c.j)
+						sumX += c.x * c.weight; sumY += c.y * c.weight; sumW += c.weight
+					}
+				}
+			}
+		}
+		if (sumW <= 0) continue
+		let cx = sumX / sumW, cy = sumY / sumW
+
+		// refine with least-squares intersection of all member lines (minimizes sum of squared
+		// perpendicular distances), more robust than the weighted-average of pairwise intersections
+		let memberLines = [...members].map(idx => lines[idx].geo)
+		let refined = leastSquaresIntersection(memberLines, cx, cy)
+		if (refined) { cx = refined.x; cy = refined.y }
+
+		// score = total length of member lines that actually point at the refined VP
+		let score = 0
+		for (let idx of members) {
+			let s = lines[idx]
+			let d = Math.abs(s.geo.a * cx + s.geo.b * cy + s.geo.c)
+			if (d < clusterRadius) score += s.length
+		}
+		clusters.push({ x: cx, y: cy, score, members: [...members].map(idx => lines[idx]) })
+	}
+
+	clusters.sort((a, b) => b.score - a.score)
+	return clusters
+}
+
+/** Point minimizing sum of squared perpendicular distances to a set of normalized lines (a,b,c), via 2x2 least squares. Falls back to null if the system is near-singular. */
+function leastSquaresIntersection(geoLines, seedX, seedY) {
+	let Saa = 0, Sab = 0, Sbb = 0, Sac = 0, Sbc = 0
+	for (let l of geoLines) {
+		Saa += l.a * l.a; Sab += l.a * l.b; Sbb += l.b * l.b
+		Sac += l.a * l.c; Sbc += l.b * l.c
+	}
+	let det = Saa * Sbb - Sab * Sab
+	if (Math.abs(det) < 1e-9) return null
+	let x = (-Sbb * Sac + Sab * Sbc) / det
+	let y = (Sab * Sac - Saa * Sbc) / det
+	return { x, y }
+}
+
+// --- calibration: focal length from 2 orthogonal vanishing points ---
+
+function calibrateFromPair(v1, v2, cx, cy) {
+	let d1x = v1.x - cx, d1y = v1.y - cy
+	let d2x = v2.x - cx, d2y = v2.y - cy
+	let f2 = -(d1x * d2x + d1y * d2y) // orthogonality constraint: (v1-c).(v2-c) = -f^2
+	if (f2 <= 0) return null
+	return Math.sqrt(f2)
+}
+
+// --- main pipeline ---
+
+function run() {
+	if (!cvReady) return
+	status('Elaborazione...')
+	let base = document.getElementById('base')
+	let src = cv.imread(base)
+
+	// downscale before edge detection: this is the main noise-suppression knob for a busy scene
+	// (crystal facets, calcite texture) - fine texture disappears while long structural edges
+	// (wall corners, block grid lines) survive, and it's cheaper too. Detected lines are scaled
+	// back up to full-resolution coordinates afterwards so everything downstream (VP clustering,
+	// calibration) stays in the original image's pixel space.
+	let maxDim = parseInt(maxdim.value)
+	let scale = Math.min(1, maxDim / Math.max(src.cols, src.rows))
+	let working = src
+	if (scale < 1) {
+		working = new cv.Mat()
+		cv.resize(src, working, new cv.Size(Math.round(src.cols * scale), Math.round(src.rows * scale)), 0, 0, cv.INTER_AREA)
+	}
+
+	let gray = new cv.Mat()
+	cv.cvtColor(working, gray, cv.COLOR_RGBA2GRAY)
+	let blurred = new cv.Mat()
+	cv.GaussianBlur(gray, blurred, new cv.Size(3, 3), 0)
+	let edges = new cv.Mat()
+	let c1 = parseInt(canny1.value), c2 = parseInt(canny2.value)
+	cv.Canny(blurred, edges, c1, c2, 3)
+
+	let lines = new cv.Mat()
+	let houghThresh = parseInt(hough_thresh.value)
+	let minLen = parseInt(hough_minlen.value)
+	let maxGap = parseInt(hough_maxgap.value)
+	cv.HoughLinesP(edges, lines, 1, Math.PI / 180, houghThresh, minLen, maxGap)
+
+	let segments = []
+	let inv = 1 / scale
+	for (let i = 0; i < lines.rows; i++) {
+		let x1 = lines.data32S[i * 4] * inv, y1 = lines.data32S[i * 4 + 1] * inv
+		let x2 = lines.data32S[i * 4 + 2] * inv, y2 = lines.data32S[i * 4 + 3] * inv
+		let length = Math.hypot(x2 - x1, y2 - y1)
+		segments.push({ x1, y1, x2, y2, length })
+	}
+
+	src.delete(); gray.delete(); blurred.delete(); edges.delete(); lines.delete()
+	if (working !== src) working.delete()
+
+	status('Trovati ' + segments.length + ' segmenti. Cerco punti di fuga...')
+	let clusters = findVanishingPoints(segments, base.width, base.height)
+	renderOverlay(segments, clusters, base.width, base.height)
+	renderResults(clusters, base.width, base.height)
+	status('Fatto: ' + segments.length + ' segmenti, ' + clusters.length + ' cluster candidati.')
+}
+
+function renderOverlay(segments, clusters, w, h) {
+	let overlay = document.getElementById('overlay')
+	let ctx = overlay.getContext('2d')
+	ctx.clearRect(0, 0, w, h)
+
+	// all raw Hough segments first, faint
+	ctx.lineWidth = 1
+	ctx.strokeStyle = 'rgba(255,255,255,0.25)'
+	for (let s of segments) {
+		ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke()
+	}
+
+	// then overlay member lines of the top clusters in color, on top
+	clusters.slice(0, VP_COLORS.length).forEach((cl, ci) => {
+		ctx.strokeStyle = VP_COLORS[ci]
+		ctx.lineWidth = 2
+		for (let s of cl.members) {
+			ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke()
+		}
+	})
+
+	// vanishing point markers (clamped into view with an arrow if off-canvas)
+	clusters.slice(0, VP_COLORS.length).forEach((cl, ci) => {
+		ctx.fillStyle = VP_COLORS[ci]
+		let x = cl.x, y = cl.y
+		let onScreen = x >= 0 && x <= w && y >= 0 && y <= h
+		if (!onScreen) {
+			// clamp to edge, pointing toward the real VP
+			let cx = w / 2, cy = h / 2
+			let dx = x - cx, dy = y - cy
+			let scale = Math.min((w / 2 - 10) / Math.abs(dx || 1e-6), (h / 2 - 10) / Math.abs(dy || 1e-6))
+			x = cx + dx * scale; y = cy + dy * scale
+		}
+		ctx.beginPath(); ctx.arc(x, y, 7, 0, 2 * Math.PI); ctx.fill()
+		ctx.strokeStyle = 'black'; ctx.lineWidth = 1.5; ctx.stroke()
+		ctx.fillStyle = 'white'; ctx.font = 'bold 13px sans-serif'
+		ctx.fillText('VP' + ci, x + 10, y - 10)
+	})
+
+	// principal point (image center) marker
+	ctx.strokeStyle = '#fff'; ctx.lineWidth = 1
+	let cx = w / 2, cy = h / 2
+	ctx.beginPath(); ctx.moveTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy + 10); ctx.stroke()
+}
+
+function renderResults(clusters, w, h) {
+	let tbody = document.querySelector('#vp_table tbody')
+	tbody.innerHTML = ''
+	clusters.slice(0, 8).forEach((cl, ci) => {
+		let tr = document.createElement('tr')
+		let color = ci < VP_COLORS.length ? VP_COLORS[ci] : '#888'
+		tr.innerHTML = '<td><span class="swatch" style="background:' + color + '"></span>VP' + ci + '</td>' +
+			'<td>' + cl.x.toFixed(0) + ', ' + cl.y.toFixed(0) + '</td>' +
+			'<td>' + cl.score.toFixed(0) + '</td>' +
+			'<td>' + cl.members.length + '</td>'
+		tbody.appendChild(tr)
+	})
+
+	// try all pairs among the top few clusters, keep the one with the best (highest-score-sum,
+	// geometrically valid) orthogonal calibration
+	let cx = w / 2, cy = h / 2
+	let best = null
+	let top = clusters.slice(0, 5)
+	for (let i = 0; i < top.length; i++) {
+		for (let j = i + 1; j < top.length; j++) {
+			let f = calibrateFromPair(top[i], top[j], cx, cy)
+			if (f === null) continue
+			let combinedScore = top[i].score + top[j].score
+			if (!best || combinedScore > best.combinedScore) best = { f, i, j, combinedScore }
+		}
+	}
+
+	let out = document.getElementById('calib_result')
+	if (!best) {
+		out.innerHTML = '<span style="color:#f87171">Nessuna coppia di VP ortogonale valida trovata.</span>'
+		return
+	}
+	let f = best.f
+	let vFOV = 2 * Math.atan((h / 2) / f) * 180 / Math.PI
+	let hFOV = 2 * Math.atan((w / 2) / f) * 180 / Math.PI
+	out.innerHTML =
+		'Coppia usata: VP' + best.i + ' + VP' + best.j + '<br>' +
+		'<div class="result-big">f = ' + f.toFixed(1) + ' px</div>' +
+		'FOV verticale: <b>' + vFOV.toFixed(1) + '&deg;</b> (Minecraft: 30-110&deg;, default 70&deg;)<br>' +
+		'FOV orizzontale: <b>' + hFOV.toFixed(1) + '&deg;</b>'
+}
+
+document.getElementById('run_btn').addEventListener('click', run)
+</script>
+</body>
+</html>
