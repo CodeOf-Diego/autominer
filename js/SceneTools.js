@@ -1,3 +1,61 @@
+/**
+ * Real Minecraft block textures (16x16, pixelated), sourced from the MIT-licensed
+ * PrismarineJS/minecraft-assets repo (a community repackaging of Mojang's vanilla assets for
+ * tool use, not redistributed further than this local dev project) - see textures/blocks/.
+ * Loaded once and cached so every voxel of the same texture shares one GPU texture.
+ */
+const TEXTURE_LOADER = new THREE.TextureLoader()
+const TEXTURE_CACHE = {}
+function loadTexture(name) {
+    if (TEXTURE_CACHE[name] === undefined) {
+        let tex = TEXTURE_LOADER.load('textures/blocks/' + name + '.png')
+        tex.magFilter = THREE.NearestFilter
+        tex.minFilter = THREE.NearestFilter
+        if (THREE.SRGBColorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace
+        TEXTURE_CACHE[name] = tex
+    }
+    return TEXTURE_CACHE[name]
+}
+const MATERIAL_CACHE = {}
+/** One texture on all 6 faces */
+function uniformMaterial(name, opacity) {
+    let key = name + ':' + (opacity||1)
+    if (MATERIAL_CACHE[key] === undefined) {
+        MATERIAL_CACHE[key] = new THREE.MeshBasicMaterial({ map: loadTexture(name), transparent: !!opacity, opacity: opacity||1 })
+    }
+    return MATERIAL_CACHE[key]
+}
+/** Different texture on top/bottom vs the 4 sides (e.g. honey block) */
+function topBottomSideMaterial(topName, bottomName, sideName) {
+    let key = 'tbs:' + topName + ':' + bottomName + ':' + sideName
+    if (MATERIAL_CACHE[key] === undefined) {
+        let side = uniformMaterial(sideName), top = uniformMaterial(topName), bottom = uniformMaterial(bottomName)
+        // BoxGeometry face material order: +X, -X, +Y(top), -Y(bottom), +Z, -Z
+        MATERIAL_CACHE[key] = [side, side, top, bottom, side, side]
+    }
+    return MATERIAL_CACHE[key]
+}
+/**
+ * Directional block (piston, observer): a distinct texture on the face it's "facing", the
+ * opposite face, and the 4 remaining sides. dir is a [dx,dy,dz] unit vector (exactly one
+ * component is +-1) pointing at the facing face.
+ */
+function directionalMaterial(frontName, sideName, backName, dir) {
+    let key = 'dir:' + frontName + ':' + sideName + ':' + backName + ':' + dir.join(',')
+    if (MATERIAL_CACHE[key] === undefined) {
+        let front = uniformMaterial(frontName), side = uniformMaterial(sideName), back = uniformMaterial(backName)
+        let mats = [side, side, side, side, side, side] // +X,-X,+Y,-Y,+Z,-Z
+        if (dir[0] === 1) { mats[0] = front; mats[1] = back }
+        else if (dir[0] === -1) { mats[1] = front; mats[0] = back }
+        else if (dir[1] === 1) { mats[2] = front; mats[3] = back }
+        else if (dir[1] === -1) { mats[3] = front; mats[2] = back }
+        else if (dir[2] === 1) { mats[4] = front; mats[5] = back }
+        else if (dir[2] === -1) { mats[5] = front; mats[4] = back }
+        MATERIAL_CACHE[key] = mats
+    }
+    return MATERIAL_CACHE[key]
+}
+
 class SceneTools {
 	axes = ['x','y','z']
 	
@@ -87,9 +145,9 @@ class SceneTools {
 	  
 		// Create a new Three.js voxel material
 		let voxelMaterial = []
-		voxelMaterial[Voxels.AMETHIST] = new THREE.MeshBasicMaterial({ color: 0xff00dd });
-		voxelMaterial[Voxels.SLIME_BLOCK] = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-		voxelMaterial[Voxels.HONEY_BLOCK] = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+		voxelMaterial[Voxels.AMETHIST] = uniformMaterial('amethyst_block');
+		voxelMaterial[Voxels.SLIME_BLOCK] = uniformMaterial('slime_block');
+		voxelMaterial[Voxels.HONEY_BLOCK] = topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side');
 	
 		voxelMaterial[Plains.ADJACENT] = new THREE.MeshBasicMaterial({ color: 0xffff00 });
 		voxelMaterial[Plains.SUPPORT] = new THREE.MeshBasicMaterial({ color: 0xffbb00 });
@@ -113,14 +171,11 @@ class SceneTools {
 		}
 
 		// Cells >= MATERIAL_ID_OFFSET (see BuildingTools.js) are the 2-color slime/honey view:
-		// green for material 0, yellow for material 1.
-		let materialColorCache = {}
-		const MATERIAL_COLORS = { 0: 0x16a34a, 1: 0xeab308 }
+		// real slime/honey textures, material 0 = slime, material 1 = honey.
 		function materialForMaterial(matId) {
-			if (materialColorCache[matId] === undefined) {
-				materialColorCache[matId] = new THREE.MeshBasicMaterial({ color: MATERIAL_COLORS[matId] })
-			}
-			return materialColorCache[matId]
+			return matId === 1
+				? topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side')
+				: uniformMaterial('slime_block')
 		}
 
 		// Create a new Three.js voxel mesh array
@@ -147,30 +202,36 @@ class SceneTools {
 	}
 
 	/**
-	 * Renders a list of MachineTools.computeMachineBlocks() blocks as simple colored voxels,
-	 * using the same centering convention as addMeshToScene() so they line up with it.
+	 * Renders a list of MachineTools.computeMachineBlocks() blocks with real textures, oriented
+	 * correctly for pistons/observers, using the same centering convention as addMeshToScene()
+	 * so they line up with it.
 	 */
 	addMachinesToScene(machineBlocks, displaySize) {
 		const voxelSize = 1;
 		let voxelGeometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
-		let materialCache = {};
-		function materialFor(key, hex) {
-			if (materialCache[key] === undefined) materialCache[key] = new THREE.MeshBasicMaterial({ color: hex });
-			return materialCache[key];
+
+		// converts a template-local facing ('along'/'-along'/'up'/'-up') into a world [dx,dy,dz]
+		function facingToWorldDir(b) {
+			if (!b.facing) return null;
+			let dir = {x:0, y:0, z:0};
+			if (b.facing === 'along') dir[b.axis] = b.worldDir;
+			else if (b.facing === '-along') dir[b.axis] = -b.worldDir;
+			else dir[perpendicular(b.axis)[0]] = (b.facing === 'up') ? 1 : -1;
+			return [dir.x, dir.y, dir.z];
 		}
-		const TYPE_COLOR = { piston: 0x9c7b4f, observer: 0x3a3a3a, lamp: 0xf4dfa0, note: 0x6b4a2f, obsidian: 0x1b1022 };
-		const MATERIAL_HEX = { 0: 0x16a34a, 1: 0xeab308 }; // 0 = slime, 1 = honey
 
 		machineBlocks.forEach((b) => {
-			let hex, key;
-			if (b.type === 'opposite' || b.type === 'slime') {
-				hex = MATERIAL_HEX[b.materialIndex];
-				key = 'mat' + b.materialIndex;
-			} else {
-				hex = TYPE_COLOR[b.type];
-				key = b.type;
-			}
-			let mesh = new THREE.Mesh(voxelGeometry, materialFor(key, hex));
+			let material;
+			if (b.type === 'obsidian') material = uniformMaterial('obsidian');
+			else if (b.type === 'lamp') material = uniformMaterial('redstone_lamp');
+			else if (b.type === 'note') material = uniformMaterial('note_block');
+			else if (b.type === 'piston') material = directionalMaterial('piston_top_sticky', 'piston_side', 'piston_bottom', facingToWorldDir(b));
+			else if (b.type === 'observer') material = directionalMaterial('observer_front', 'observer_side', 'observer_back', facingToWorldDir(b));
+			else material = b.materialIndex === 1 // 'opposite' or 'slime' cell -> the resolved slime/honey material
+				? topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side')
+				: uniformMaterial('slime_block');
+
+			let mesh = new THREE.Mesh(voxelGeometry, material);
 			mesh.position.set(
 				(b.x - displaySize.x / 2) * voxelSize,
 				(b.y - displaySize.y / 2) * voxelSize,
