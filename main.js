@@ -17,8 +17,11 @@ const STAGE_NAMES = {
  * Starting from a passed vein, runs the full step-2 pipeline (perimeter, valid areas,
  * capped support grouping) on all 3 axes, keeping a snapshot after each sub-stage so the
  * result can be inspected one step at a time with renderStage().
+ *
+ * seed drives every random choice in the run (vein generation included, by the caller) so the
+ * exact same result can be reproduced later just from that one number.
  */
-function processVein(vein) {
+function processVein(vein, seed) {
 	if (d!==false) {
 		d.oresCount
 		d.adjacentFaces = 0
@@ -28,6 +31,10 @@ function processVein(vein) {
 
 	vein = new Matrix3D(vein)
     console.log('vein',  vein)
+
+	// separate RNG per axis (derived from the same seed) so the 3 axes don't all draw the
+	// exact same random sequence, while the whole run stays reproducible from one seed
+	let axisRng = { x: makePRNG(seed + 1), y: makePRNG(seed + 2), z: makePRNG(seed + 3) }
 
 	let data_layers={x:{},y:{},z:{}}
 	for (let axis of ['x','y','z']) {
@@ -39,14 +46,21 @@ function processVein(vein) {
 		disableInvalidAreas(data_layers[axis])
 		data_layers[axis].snapshotValide = data_layers[axis].plain.clone() // stage 3
 
-		addSupportBlocks(data_layers[axis])
+		addSupportBlocks(data_layers[axis], axisRng[axis])
 		data_layers[axis].snapshotGruppi = buildGroupPlain(data_layers[axis]) // stage 4
 	}
 
 	vein.set(2,2,2,Voxels.RED)
 	// vein.set(12,12,12,Voxels.BLU)
 
-	pipeline = { vein, data_layers }
+	pipeline = { vein, data_layers, seed }
+}
+
+/** Generates a new random vein + grouping from a fresh (or given) seed */
+function newRun(seed) {
+	if (seed === undefined) seed = Math.floor(Math.random() * 0xffffffff)
+	let vein = generateRandomVein(seed)
+	processVein(vein, seed)
 }
 
 /** Briefly shows a message in the stage label, then restores it */
@@ -57,10 +71,10 @@ function flashStageMessage(text) {
 	setTimeout(() => { stage_info.innerHTML = original }, 1500)
 }
 
-/** Copies the exact vein currently shown to the clipboard, so a specific result can be shared and reloaded later */
+/** Copies the exact vein + seed currently shown to the clipboard, so a specific result can be shared and reloaded later */
 function exportVein() {
 	if (pipeline === null) return
-	let json = JSON.stringify(pipeline.vein.matrix)
+	let json = JSON.stringify({ seed: pipeline.seed, vein: pipeline.vein.matrix })
 	navigator.clipboard.writeText(json).then(() => {
 		flashStageMessage('Vena copiata negli appunti')
 	}).catch(() => {
@@ -101,9 +115,8 @@ function renderStage(stage) {
 window.addEventListener(`DOMContentLoaded`, () => {
 	ST.new()
 
-	let vein = generateRandomVein()
+	newRun()
 	// vein = veinXX
-	processVein(vein)
 
 	addDebugInfo()
 
@@ -114,8 +127,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 
 document.addEventListener('keydown', (event) => {
 	if (event.key === 'r') {
-		let vein = generateRandomVein()
-		processVein(vein)
+		newRun()
 		addDebugInfo()
 		renderStage(currentStage)
 	}

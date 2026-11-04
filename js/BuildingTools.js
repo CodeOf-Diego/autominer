@@ -312,7 +312,7 @@ const GROUPING_TRIALS = 40
  * areas at once, then filling the group closer to the cap, then randomly - the randomness is
  * what lets repeated trials explore different outcomes.
  */
-function simulateGrouping(data_layers) {
+function simulateGrouping(data_layers, rng) {
     let availables = {}
     for (let coords in data_layers.support.available) {
         availables[coords] = { ...data_layers.support.available[coords] }
@@ -368,7 +368,7 @@ function simulateGrouping(data_layers) {
             a.minDegree - b.minDegree ||
             b.chosen.length - a.chosen.length ||
             b.total - a.total ||
-            Math.random() - 0.5
+            rng() - 0.5
         )
         let best = candidates[0]
 
@@ -469,10 +469,10 @@ function evaluateGrouping(data_layers, result) {
  * data_layers.support.oversizedAreas. Splitting an oversized contiguous area into
  * multiple <=12 chunks is a separate problem, not yet implemented.
  */
-function addSupportBlocksFromList(data_layers) {
+function addSupportBlocksFromList(data_layers, rng) {
     let best = null
     for (let trial = 0; trial < GROUPING_TRIALS; trial++) {
-        let result = simulateGrouping(data_layers)
+        let result = simulateGrouping(data_layers, rng)
         let evaluation = evaluateGrouping(data_layers, result)
         if (best === null ||
             (evaluation.bipartite && !best.evaluation.bipartite) ||
@@ -533,12 +533,12 @@ function buildGroupPlain(data_layers) {
 /**
  * Tries to find the optimal solution of support blocks to add to the blueprint so that all sticky blocks are connected
  */
-function addSupportBlocks(data_layers) {
+function addSupportBlocks(data_layers, rng) {
     data_layers.support = {}
     // find all subareas given the actual plain configuration
     findSubAreas(data_layers)
     // find the blocks neighboors to multiple areas
     findSupportBlockLocations(data_layers)
     // checks all the proposed support blocks, starting from the ones with the highest amount of different neighboors
-    addSupportBlocksFromList(data_layers)
+    addSupportBlocksFromList(data_layers, rng)
 }
