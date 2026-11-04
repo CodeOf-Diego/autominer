@@ -2,13 +2,17 @@
  * Real Minecraft block textures (16x16, pixelated), sourced from the MIT-licensed
  * PrismarineJS/minecraft-assets repo (a community repackaging of Mojang's vanilla assets for
  * tool use, not redistributed further than this local dev project) - see textures/blocks/.
+ * Loaded from the base64 data URIs in js/TextureData.js (not from textures/blocks/*.png directly):
+ * opening index.html via file:// instead of a local server treats each file:// resource as its
+ * own origin, so the browser blocks the image fetch as cross-origin and every material renders
+ * black. Data URIs need no fetch at all, so they work the same under file:// and http://.
  * Loaded once and cached so every voxel of the same texture shares one GPU texture.
  */
 const TEXTURE_LOADER = new THREE.TextureLoader()
 const TEXTURE_CACHE = {}
 function loadTexture(name) {
     if (TEXTURE_CACHE[name] === undefined) {
-        let tex = TEXTURE_LOADER.load('textures/blocks/' + name + '.png')
+        let tex = TEXTURE_LOADER.load(TEXTURE_DATA[name])
         tex.magFilter = THREE.NearestFilter
         tex.minFilter = THREE.NearestFilter
         if (THREE.SRGBColorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace
