@@ -60,3 +60,48 @@ function generateRandomVein(seed) {
     return vein
 }
   
+
+/**
+ * Compact form of a vein, for sharing/pasting: instead of the full x*y*z matrix (almost all
+ * air) only the grid size and the coordinates of the amethyst cells are written, 0-based
+ * [x,y,z] like the matrix indices - e.g. {size:[15,15,15], ores:[[3,10,6],[3,11,7],...]}.
+ * Anything that isn't amethyst (air, and the red debug marker processVein() puts at 2,2,2) is
+ * not part of the vein data and is not exported. The size is kept because air outside the
+ * ores is part of the result (the perimeter search looks at the cells around the vein, and
+ * where the grid ends changes what exists around it).
+ */
+function veinToSparse(matrix) {
+    let ores = []
+    for (let x=0; x<matrix.length; x++)
+        for (let y=0; y<matrix[x].length; y++)
+            for (let z=0; z<matrix[x][y].length; z++)
+                if (matrix[x][y][z] === Voxels.AMETHIST) ores.push([x,y,z])
+    return { size: [matrix.length, matrix[0].length, matrix[0][0].length], ores }
+}
+
+/** Inverse of veinToSparse(): rebuilds the full matrix (air everywhere, amethyst at `ores`) */
+function veinFromSparse(sparse) {
+    let [sx,sy,sz] = sparse.size
+    let matrix = []
+    for (let x=0; x<sx; x++) {
+        matrix[x] = []
+        for (let y=0; y<sy; y++) matrix[x][y] = new Array(sz).fill(Voxels.AIR)
+    }
+    for (let [x,y,z] of sparse.ores) matrix[x][y][z] = Voxels.AMETHIST
+    return matrix
+}
+
+/**
+ * Reads a pasted export ({seed, size, ores}) and returns {seed, vein} ready for
+ * processVein(vein, seed). The old dense format ({seed, vein:[[[...]]]}) still loads too, so
+ * exports copied before the compact format existed keep working.
+ */
+function veinFromExport(data) {
+    let vein = data.ores !== undefined ? veinFromSparse(data) : data.vein
+    if (d !== false) {
+        let ores = 0
+        for (let plane of vein) for (let row of plane) for (let cell of row) if (cell === Voxels.AMETHIST) ores++
+        d.oresCount = ores
+    }
+    return { seed: data.seed, vein }
+}

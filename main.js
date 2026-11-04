@@ -28,6 +28,8 @@ function processVein(vein, seed) {
 		d.adjacentFaces = 0
 		d.plainAdjacents = {x:0,y:0,z:0}
 		d.plainSupports = {x:0,y:0,z:0}
+		d.groupBlocks = 0 // blocks in all final groups (adjacent + support), summed over the 3 axes
+		d.groupCount = 0  // final groups, summed over the 3 axes
 	}
 
 	vein = new Matrix3D(vein)
@@ -50,6 +52,11 @@ function processVein(vein, seed) {
 		addSupportBlocks(data_layers[axis], axisRng[axis])
 		data_layers[axis].snapshotGruppi = buildGroupPlain(data_layers[axis]) // stage 4
 		data_layers[axis].snapshotMateriali = buildMaterialPlain(data_layers[axis]) // stage 5
+
+		// groupSizes: {finalGroupId: blocks}, support blocks included (each is <= 12 unless oversized)
+		let sizes = Object.values(data_layers[axis].support.groupSizes)
+		d.groupCount += sizes.length
+		d.groupBlocks += sizes.reduce((sum, n) => sum + n, 0)
 	}
 
 	vein.set(2,2,2,Voxels.RED)
@@ -76,7 +83,9 @@ function flashStageMessage(text) {
 /** Copies the exact vein + seed currently shown to the clipboard, so a specific result can be shared and reloaded later */
 function exportVein() {
 	if (pipeline === null) return
-	let json = JSON.stringify({ seed: pipeline.seed, vein: pipeline.vein.matrix })
+	// compact form (size + ore coordinates) instead of the full matrix - see veinToSparse() in Tools.js.
+	// Load it back with veinFromExport(); the old dense {seed, vein} format loads there too.
+	let json = JSON.stringify({ seed: pipeline.seed, ...veinToSparse(pipeline.vein.matrix) })
 	navigator.clipboard.writeText(json).then(() => {
 		flashStageMessage('Vena copiata negli appunti')
 	}).catch(() => {

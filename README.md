@@ -51,7 +51,7 @@ Quando si aggiungeranno gli step 3+, andranno integrati in questa stessa vista a
 
 ## Riproducibilità (seed)
 
-Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numerico, generato casualmente a ogni avvio/rigenerazione ma completamente deterministico: lo stesso seed produce sempre esattamente lo stesso risultato. Premendo `e` si copia negli appunti `{seed, vein}` — incollando quel JSON si ha tutto il necessario per riprodurre un caso specifico (es. per segnalare un problema).
+Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numerico, generato casualmente a ogni avvio/rigenerazione ma completamente deterministico: lo stesso seed produce sempre esattamente lo stesso risultato. Premendo `e` si copia negli appunti un JSON compatto `{seed, size, ores}` (dimensione della griglia + coordinate `[x,y,z]` delle sole celle di ametista, 0-based come gli indici della matrice; ~180 byte invece di ~7 KB per una griglia 15×15×15). Per ricaricarlo: `let {seed, vein} = veinFromExport(json); processVein(vein, seed)` — legge anche il vecchio formato denso `{seed, vein}`. Per una vena casuale il solo `seed` basta già a rigenerarla; `ores` serve per veine non generate (geoide reale).
 
 ## Stato attuale
 
@@ -63,7 +63,7 @@ Ogni run (vena + raggruppamento sui 3 assi) è guidato da un singolo seed numeri
 
 - `js/Blocks.js` — enum dei tipi di voxel/blocco.
 - `js/Matrix2D.js` / `js/Matrix3D.js` — wrapper per matrici 2D/3D con helper per scorrerle, leggere le celle vicine e clonarle (usato per gli snapshot degli stage).
-- `js/Tools.js` — generazione del geoide casuale (seedata) + PRNG deterministico (`makePRNG`).
+- `js/Tools.js` — generazione del geoide casuale (seedata) + PRNG deterministico (`makePRNG`), formato compatto delle vene (`veinToSparse`/`veinFromSparse`/`veinFromExport`).
 - `js/BuildingTools.js` — tutta la logica dello step 2 (perimetro, aree, supporti, raggruppamento a 12 blocchi con 2-colorazione slime/honey).
 - `js/SceneTools.js` — setup scena/camere Three.js e rendering dei voxel (palette fissa per gruppo allo stage 4, 2 colori materiale allo stage 5).
 - `main.js` — orchestratore: genera il geoide da un seed, lancia la pipeline con gli snapshot per stage, gestisce i tasti (1-5 per lo stage, `r` per rigenerare, `e` per esportare, `i` per il debug info).

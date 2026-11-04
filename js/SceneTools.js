@@ -63,9 +63,12 @@ class SceneTools {
 			label.style.zIndex = 10
 			label.style.color = 'white'
 			label.style.fontSize = '16px'
-			label.style.left = (ST.Wmain + 6) + 'px'
+			// centered on the viewport, i.e. on the drawing (the vein is centered on the origin each camera looks at)
+			label.style.left = (ST.Wmain + ST.Worth/2) + 'px'
 			// viewports are stacked bottom-up in WebGL coordinates, so row `pos` sits (pos+1) rows up from the bottom
-			label.style.top = (ST.H - ST.Horth*(pos+1) + 4) + 'px'
+			label.style.top = (ST.H - ST.Horth*(pos+1) + ST.Horth/2) + 'px'
+			label.style.transform = 'translate(-50%, -50%)'
+			label.style.pointerEvents = 'none'
 			document.body.appendChild(label)
 		})
 	}
@@ -180,4 +183,6 @@ function addDebugInfo() {
 	debug_info.innerHTML +='Total ores: '+ d.oresCount+'<br>'
 	debug_info.innerHTML +='Adjacent ore faces: '+ d.adjacentFaces +' ('+ parseInt(100-(d.adjacentFaces/totalFaces*100)) +'% of theoretical maximum)<br>'
 	debug_info.innerHTML +='plains blocks:  x:'+ (d.plainAdjacents.x + d.plainSupports.x) +',  y:'+ (d.plainAdjacents.y + d.plainSupports.y) +',  z:'+ (d.plainAdjacents.z + d.plainSupports.z) +'<br>'
+	let avgGroup = d.groupCount > 0 ? d.groupBlocks / d.groupCount : 0
+	debug_info.innerHTML +='Groups (x+y+z): '+ d.groupBlocks +' blocks, '+ d.groupCount +' groups, avg '+ avgGroup.toFixed(2) +' blocks/group<br>'
 }
