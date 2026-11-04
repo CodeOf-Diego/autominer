@@ -20,8 +20,21 @@ class Matrix3D {
 
     /** returns the size of a dimension of the matrix */
     maxX() { return this.matrix.length }
-    maxY() { return this.matrix[0].length }
-    maxZ() { return this.matrix[0][0].length }
+    // scans every row/col instead of assuming row/col 0 is the tallest - with buildDisplay()'s
+    // inverted axes, row 0 can legitimately be shorter than other rows (see Matrix3D.js history)
+    maxY() {
+        let max = 0
+        for (let row of this.matrix) if (row && row.length > max) max = row.length
+        return max
+    }
+    maxZ() {
+        let max = 0
+        for (let row of this.matrix) {
+            if (!row) continue
+            for (let col of row) if (col && col.length > max) max = col.length
+        }
+        return max
+    }
 
     /** Deep copy, so rendering a stage doesn't grow/mutate the shared vein */
     clone() {
@@ -110,8 +123,9 @@ class ToolsMatrix3D {
      * @param {{x:Matrix2D,y:Matrix2D,z:Matrix2D}} blueprintPlains one plain per axis
      * @param {number} gap blocks of separation between the vein and each blueprint
      * @param {{x:boolean,y:boolean,z:boolean}} invert true to place that axis's blueprint before the vein instead of after
+     * @param {{x:boolean,y:boolean,z:boolean}} show false to leave that axis's blueprint out entirely (default: all true)
      */
-    buildDisplay(vein, blueprintPlains, gap, invert) {
+    buildDisplay(vein, blueprintPlains, gap, invert, show={x:true,y:true,z:true}) {
         let originalDim = { x: vein.maxX(), y: vein.maxY(), z: vein.maxZ() }
         let shift = {
             x: invert.x ? gap + 1 : 0,
@@ -123,6 +137,7 @@ class ToolsMatrix3D {
             display.set(i.x + shift.x, i.y + shift.y, i.z + shift.z, vein.GET())
         })
         for (let axis of ['x', 'y', 'z']) {
+            if (!show[axis]) continue
             let blueprint = this.plainToVolume(blueprintPlains[axis], axis)
             let offset = { x: shift.x, y: shift.y, z: shift.z }
             offset[axis] = invert[axis] ? 0 : (originalDim[axis] + shift[axis] + gap)

@@ -12,6 +12,7 @@ let settings = {
 	range: 2.3,     // shell thickness tolerance
 	gap: 1,         // blocks of separation between the vein and each axis's blueprint
 	invert: { x: false, y: false, z: false }, // build that axis's blueprint before the vein instead of after
+	show: { x: true, y: true, z: true }, // whether to draw that axis's blueprint at all
 	slimePreference: 100, // 0 = max honey, 100 = max slime. UI only for now, not yet wired into the grouping algorithm
 }
 
@@ -127,7 +128,7 @@ function renderStage(stage) {
 				: stage === 4 ? pipeline.data_layers[axis].snapshotGruppi
 				: pipeline.data_layers[axis].snapshotMateriali
 		}
-		display = Tools3D.buildDisplay(pipeline.vein, snapshots, settings.gap, settings.invert)
+		display = Tools3D.buildDisplay(pipeline.vein, snapshots, settings.gap, settings.invert, settings.show)
 	}
 	ST.addMeshToScene(display)
 
@@ -138,7 +139,8 @@ function renderStage(stage) {
 			{ x: display.maxX(), y: display.maxY(), z: display.maxZ() },
 			{ x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() },
 			settings.gap,
-			settings.invert
+			settings.invert,
+			settings.show
 		)
 	} else {
 		ST.clearGroupLabels()
@@ -189,9 +191,16 @@ function setupSettingsMenu() {
 		slime_pref_val.textContent = formatSlimePreference(settings.slimePreference)
 	})
 	for (let axis of ['x','y','z']) {
-		let checkbox = document.getElementById('invert_' + axis)
-		checkbox.addEventListener('change', () => {
-			settings.invert[axis] = checkbox.checked
+		let invertCheckbox = document.getElementById('invert_' + axis)
+		invertCheckbox.addEventListener('change', () => {
+			settings.invert[axis] = invertCheckbox.checked
+			if (pipeline !== null) renderStage(currentStage)
+		})
+
+		let showCheckbox = document.getElementById('show_' + axis)
+		showCheckbox.checked = settings.show[axis]
+		showCheckbox.addEventListener('change', () => {
+			settings.show[axis] = showCheckbox.checked
 			if (pipeline !== null) renderStage(currentStage)
 		})
 	}

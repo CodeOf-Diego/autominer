@@ -162,9 +162,9 @@ class SceneTools {
 	 * displaySize is the combined display matrix's {x,y,z} dimensions (same as addMeshToScene's
 	 * matrixSize); originalSize is the vein's own {x,y,z}; gap/invert must match whatever was
 	 * passed to Tools3D.buildDisplay() for this render, so labels land where the blueprint
-	 * actually is.
+	 * actually is. show (default all true) skips an axis entirely when its blueprint is hidden.
 	 */
-	updateGroupLabels(data_layers, displaySize, originalSize, gap, invert) {
+	updateGroupLabels(data_layers, displaySize, originalSize, gap, invert, show={x:true,y:true,z:true}) {
 		ST.clearGroupLabels();
 		const voxelSize = 1;
 		const pos = { x: 0, y: 1, z: 2 }; // row index of each axis's viewport, matches ST.axes order
@@ -183,6 +183,7 @@ class SceneTools {
 		const cameraForAxis = { x: 'z', y: 'y', z: 'x' }
 
 		ST.axes.forEach((axis) => {
+			if (!show[axis]) return;
 			let ppd = perpendicular(axis);
 			let cameraAxis = cameraForAxis[axis];
 			let camera = ST.Ocamera[cameraAxis];
