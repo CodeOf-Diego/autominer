@@ -146,6 +146,40 @@ class SceneTools {
 		})
 	}
 
+	/**
+	 * Renders a list of MachineTools.computeMachineBlocks() blocks as simple colored voxels,
+	 * using the same centering convention as addMeshToScene() so they line up with it.
+	 */
+	addMachinesToScene(machineBlocks, displaySize) {
+		const voxelSize = 1;
+		let voxelGeometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
+		let materialCache = {};
+		function materialFor(key, hex) {
+			if (materialCache[key] === undefined) materialCache[key] = new THREE.MeshBasicMaterial({ color: hex });
+			return materialCache[key];
+		}
+		const TYPE_COLOR = { piston: 0x9c7b4f, observer: 0x3a3a3a, lamp: 0xf4dfa0, note: 0x6b4a2f, obsidian: 0x1b1022 };
+		const MATERIAL_HEX = { 0: 0x16a34a, 1: 0xeab308 }; // 0 = slime, 1 = honey
+
+		machineBlocks.forEach((b) => {
+			let hex, key;
+			if (b.type === 'opposite' || b.type === 'slime') {
+				hex = MATERIAL_HEX[b.materialIndex];
+				key = 'mat' + b.materialIndex;
+			} else {
+				hex = TYPE_COLOR[b.type];
+				key = b.type;
+			}
+			let mesh = new THREE.Mesh(voxelGeometry, materialFor(key, hex));
+			mesh.position.set(
+				(b.x - displaySize.x / 2) * voxelSize,
+				(b.y - displaySize.y / 2) * voxelSize,
+				(b.z - displaySize.z / 2) * voxelSize
+			);
+			ST.scene.add(mesh);
+		});
+	}
+
 	clearScene() {
 		let toRemove = ST.scene.children.filter((child) => child !== ST.axesLines);
 		ST.scene.remove.apply(ST.scene, toRemove);

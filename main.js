@@ -22,6 +22,7 @@ const STAGE_NAMES = {
 	3: 'Confini validi',
 	4: 'Raggruppamenti (max 12 blocchi)',
 	5: 'Materiali (slime/honey)',
+	6: 'Flying machines (una per gruppo)',
 }
 
 /**
@@ -111,7 +112,7 @@ function exportVein() {
 	})
 }
 
-/** Renders one stage of the pipeline (1-5) from the already computed snapshots */
+/** Renders one stage of the pipeline (1-6) from the already computed snapshots */
 function renderStage(stage) {
 	if (pipeline === null) return
 	currentStage = stage
@@ -126,28 +127,38 @@ function renderStage(stage) {
 			snapshots[axis] = stage === 2 ? pipeline.data_layers[axis].snapshotStretti
 				: stage === 3 ? pipeline.data_layers[axis].snapshotValide
 				: stage === 4 ? pipeline.data_layers[axis].snapshotGruppi
-				: pipeline.data_layers[axis].snapshotMateriali
+				: pipeline.data_layers[axis].snapshotMateriali // stage 5 and 6 share the materials base
 		}
 		display = Tools3D.buildDisplay(pipeline.vein, snapshots, settings.gap, settings.invert, settings.show)
 	}
 	ST.addMeshToScene(display)
 
+	let displaySize = { x: display.maxX(), y: display.maxY(), z: display.maxZ() }
+	let originalSize = { x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() }
+
 	// group index numbers only make sense once groups exist (stage 4+)
 	if (stage >= 4) {
-		ST.updateGroupLabels(
-			pipeline.data_layers,
-			{ x: display.maxX(), y: display.maxY(), z: display.maxZ() },
-			{ x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() },
-			settings.gap,
-			settings.invert,
-			settings.show
-		)
+		ST.updateGroupLabels(pipeline.data_layers, displaySize, originalSize, settings.gap, settings.invert, settings.show)
 	} else {
 		ST.clearGroupLabels()
 	}
 
+	// stage 6: one flying machine per final group, pushing into the geode along its axis
+	if (stage === 6) {
+		let shift = {
+			x: settings.invert.x ? settings.gap + 1 : 0,
+			y: settings.invert.y ? settings.gap + 1 : 0,
+			z: settings.invert.z ? settings.gap + 1 : 0,
+		}
+		for (let axis of ['x','y','z']) {
+			if (!settings.show[axis]) continue
+			let blocks = computeMachineBlocks(pipeline.data_layers[axis], axis, originalSize, settings.gap, settings.invert, shift)
+			ST.addMachinesToScene(blocks, displaySize)
+		}
+	}
+
 	if (stage_info)
-		stage_info.innerHTML = 'Stage ' + stage + '/5 - ' + STAGE_NAMES[stage] + ' (tasti 1-5 per cambiare)'
+		stage_info.innerHTML = 'Stage ' + stage + '/6 - ' + STAGE_NAMES[stage] + ' (tasti 1-6 per cambiare)'
 }
 
 /** 0 -> "100% honey", 100 -> "100% slime", in between -> the split, e.g. "70% slime / 30% honey" */
@@ -253,7 +264,7 @@ document.addEventListener('keydown', (event) => {
 	if (event.key === 'm') {
 		settings_menu.style.display = (settings_menu.style.display == 'none') ? 'block' : 'none';
 	}
-	if (['1','2','3','4','5'].includes(event.key)) {
+	if (['1','2','3','4','5','6'].includes(event.key)) {
 		renderStage(parseInt(event.key))
 	}
 	if (event.key === 'e') {
