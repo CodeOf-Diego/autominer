@@ -274,137 +274,200 @@ function findSubAreas(data_layers) {
     data_layers.support.areaPlains = areaPlains
 }
 
-function findSupportBlockLocations(data_layers) {
-    let p = data_layers.plain
-    let a = data_layers.support.areas
-    
-    
-    // list of blocks that connect to adjacents[area of the adjacent that connects][coordinates of the area]
-    let supports = {}
-    p.loop((i)=>{
-
-        if (p.GET() == Plains.AIR) {
-            p.checkAdjacents((value, iAjd)=>{
-                if (value == Plains.ADJACENT) {
-                    if (supports[i.i+' '+i.j] === undefined)            
-                        supports[i.i+' '+i.j]={}
-                    if (supports[i.i+' '+i.j][a.get(iAjd.i,iAjd.j)] == undefined)    
-                        supports[i.i+' '+i.j][a.get(iAjd.i,iAjd.j)] = []
-                    supports[i.i+' '+i.j][a.get(iAjd.i,iAjd.j)].push(iAjd)
-                }
-            })
-        }
-    })
-    data_layers.support.available = supports
-}
-
 /** A sticky piston can only push this many blocks in a row in Minecraft */
 const MAX_PISTON_PUSH = 12
 /** How many randomized attempts to try before keeping the best one found */
 const GROUPING_TRIALS = 40
 
 /**
- * Runs one greedy merge attempt over a private copy of the candidate list, so many attempts
- * can be tried without affecting data_layers or each other. Each round picks which support
- * block to place next using "most constrained first": a node (area) that currently has few
- * alternative merge partners is prioritized over a more "popular" one, so it doesn't get
- * stranded later by capacity another merge already claimed. Ties are broken by merging more
- * areas at once, then filling the group closer to the cap, then randomly - the randomness is
- * what lets repeated trials explore different outcomes.
+ * Multi-source BFS from every cell of area A, through AIR cells only (cost 1 each), to find
+ * the shortest bridge distance (and the actual chain of air cells) from A to every other area
+ * reachable without crossing amethyst/blocked cells. Reaching another area's own cell costs
+ * nothing extra - only the air cells in between need to become slime/honey.
+ * Returns { distances: {A: {B: dist}}, paths: {A: {B: [[i,j],...]}} } for every area A.
  */
-function simulateGrouping(data_layers, rng) {
-    let availables = {}
-    for (let coords in data_layers.support.available) {
-        availables[coords] = { ...data_layers.support.available[coords] }
-    }
-    let sizes = {}, parent = {}
-    for (let area in data_layers.support.counter) {
-        sizes[area] = data_layers.support.counter[area]
-        parent[area] = area
-    }
-    function find(area) {
-        while (parent[area] !== area) area = parent[area]
-        return area
-    }
-    let supportGroup = {} // 'i j' of a placed support block -> area id it was bound to at placement time
+function computeAreaDistances(data_layers) {
+    let plain = data_layers.plain
+    let areas = data_layers.support.areas
+    let areaIds = Object.keys(data_layers.support.counter)
 
-    let progress = true
-    while (progress) {
-        progress = false
-
-        // how many distinct other areas each area could still reach this round
-        let degree = {}
-        for (let coords in availables) {
-            let touched = Object.keys(availables[coords])
-            for (let a of touched) {
-                if (degree[a] === undefined) degree[a] = new Set()
-                for (let b of touched) if (b !== a) degree[a].add(b)
+    let distances = {}, paths = {}
+    for (let A of areaIds) {
+        distances[A] = {}
+        paths[A] = {}
+        let dist = {}, prev = {}
+        let queue = []
+        plain.loop((p) => {
+            if (areas.get(p.i,p.j) == A) {
+                let key = p.i+','+p.j
+                dist[key] = 0
+                queue.push([p.i,p.j])
+            }
+        })
+        let seen = new Set(queue.map(([i,j]) => i+','+j))
+        let qi = 0
+        while (qi < queue.length) {
+            let [ci,cj] = queue[qi++]
+            let d = dist[ci+','+cj]
+            for (let [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                let ni = ci+di, nj = cj+dj
+                if (ni < 0 || ni >= plain.maxI() || nj < 0 || nj >= plain.maxJ()) continue
+                let nkey = ni+','+nj
+                if (seen.has(nkey)) continue
+                let cell = plain.get(ni,nj)
+                if (cell == Plains.AIR) {
+                    seen.add(nkey)
+                    dist[nkey] = d+1
+                    prev[nkey] = ci+','+cj
+                    queue.push([ni,nj])
+                } else if (cell == Plains.ADJACENT) {
+                    let B = areas.get(ni,nj)
+                    if (B != A && distances[A][B] === undefined) {
+                        distances[A][B] = d
+                        let path = [], curKey = ci+','+cj
+                        while (dist[curKey] > 0) {
+                            let [pi,pj] = curKey.split(',').map(Number)
+                            path.unshift([pi,pj])
+                            curKey = prev[curKey]
+                        }
+                        paths[A][B] = path
+                    }
+                    seen.add(nkey)
+                }
+                // AMETHIST/BLOCKED: impassable, left unvisited
             }
         }
+    }
+    return {distances, paths}
+}
 
-        let candidates = []
-        for (let coords in availables) {
-            let touched = Object.keys(availables[coords])
-            if (touched.length < 2) continue
-
-            // try to fit as many of the touched areas as possible under the cap,
-            // starting from the smallest so more areas have a chance to join in
-            touched.sort((a,b) => sizes[a]-sizes[b])
-            let chosen = [], total = 1 // +1 for the support block itself
-            for (let area of touched) {
-                if (total + sizes[area] <= MAX_PISTON_PUSH) {
-                    chosen.push(area)
-                    total += sizes[area]
+/**
+ * Builds a minimum spanning forest over the areas, using computeAreaDistances()'s shortest
+ * bridge distances as edge weights (the standard "metric closure MST" 2-approximation for
+ * Steiner trees). Areas that can't reach each other at all (cut off by amethyst/blocked cells)
+ * end up in separate trees. Ties are broken randomly so repeated calls can explore different
+ * (equally cheap) spanning structures.
+ */
+function buildMSTForest(areaIds, distances, rng) {
+    let remaining = new Set(areaIds)
+    let edges = []
+    while (remaining.size > 0) {
+        let start = remaining.values().next().value
+        let inTree = new Set([start])
+        remaining.delete(start)
+        let grew = true
+        while (grew) {
+            grew = false
+            let best = null
+            for (let A of inTree) {
+                for (let B in distances[A]) {
+                    if (inTree.has(B)) continue
+                    let dist = distances[A][B]
+                    if (best === null || dist < best.dist || (dist === best.dist && rng() < 0.5)) best = {A, B, dist}
                 }
             }
-            if (chosen.length < 2) continue // this block wouldn't merge anything
-
-            let minDegree = Math.min(...chosen.map(a => degree[a].size))
-            candidates.push({coords, chosen, total, minDegree})
-        }
-        if (candidates.length === 0) break
-
-        candidates.sort((a,b) =>
-            a.minDegree - b.minDegree ||
-            b.chosen.length - a.chosen.length ||
-            b.total - a.total ||
-            rng() - 0.5
-        )
-        let best = candidates[0]
-
-        let areaLead = best.chosen[0]
-        let areasToMerge = best.chosen.slice(1)
-        supportGroup[best.coords] = areaLead
-        sizes[areaLead] = best.total
-        for (let area of areasToMerge) {
-            delete sizes[area]
-            parent[area] = areaLead
-        }
-
-        for (let coords in availables) {
-            for (let area of areasToMerge) {
-                if (availables[coords][area] !== undefined) {
-                    if (availables[coords][areaLead] === undefined) availables[coords][areaLead]=[]
-                    availables[coords][areaLead] = availables[coords][areaLead].concat(availables[coords][area])
-                    delete availables[coords][area]
-                }
+            if (best !== null) {
+                inTree.add(best.B)
+                remaining.delete(best.B)
+                edges.push(best)
+                grew = true
             }
         }
-        delete availables[best.coords]
+    }
+    return edges
+}
 
-        // removes all candidates that no longer bridge 2+ distinct areas
-        for (let coords in availables) {
-            if (Object.keys(availables[coords]).length < 2)
-                delete availables[coords]
+/**
+ * Turns the area MST into an explicit tree graph: one node per area (weight = its size) plus
+ * one node per air cell used as a bridge along an MST edge (weight 1 each), chained together in
+ * the order the shortest path crosses them. Node ids: 'area:<id>' / 'cell:<i>,<j>'.
+ */
+function buildTreeAdjacency(areaIds, counter, mstEdges, paths) {
+    let nodeWeight = {}, adj = {}
+    function addNode(id, w) { if (nodeWeight[id] === undefined) { nodeWeight[id] = w; adj[id] = [] } }
+    function addEdge(a, b) { adj[a].push(b); adj[b].push(a) }
+
+    for (let A of areaIds) addNode('area:'+A, counter[A])
+    for (let {A, B} of mstEdges) {
+        let prevNode = 'area:'+A
+        for (let [i,j] of paths[A][B]) {
+            let cellId = 'cell:'+i+','+j
+            addNode(cellId, 1)
+            addEdge(prevNode, cellId)
+            prevNode = cellId
         }
-        progress = true
+        addEdge(prevNode, 'area:'+B)
+    }
+    return {nodeWeight, adj}
+}
+
+/**
+ * Partitions every tree in the forest into the minimum number of connected pieces with total
+ * weight <= cap. Classic greedy post-order DFS: a node accumulates its own weight, then tries
+ * to merge each child's already-resolved subtree (processed smallest-first, which is optimal
+ * for maximizing how many fit) - whatever doesn't fit is finalized as its own piece. This is
+ * the exact/optimal solution for this specific problem on a tree (not just a heuristic).
+ */
+function partitionForest(nodeWeight, adj, cap) {
+    let visited = new Set()
+    let pieces = []
+
+    function dfs(node, parent) {
+        visited.add(node)
+        let nodes = [node]
+        let rolled = nodeWeight[node]
+        let childResults = []
+        for (let neighbor of adj[node]) {
+            if (neighbor === parent || visited.has(neighbor)) continue
+            childResults.push(dfs(neighbor, node))
+        }
+        childResults.sort((a,b) => a.size - b.size)
+        for (let child of childResults) {
+            if (rolled + child.size <= cap) {
+                rolled += child.size
+                nodes = nodes.concat(child.nodes)
+            } else {
+                pieces.push(child)
+            }
+        }
+        return {nodes, size: rolled}
     }
 
-    // resolves every original area id (merged away or not) to its final group's id
-    let finalGroup = {}
-    for (let area in data_layers.support.counter) finalGroup[area] = find(area)
-    for (let coords in supportGroup) finalGroup[supportGroup[coords]] = find(supportGroup[coords])
+    for (let id in nodeWeight) {
+        if (visited.has(id)) continue
+        pieces.push(dfs(id, null))
+    }
+    return pieces
+}
 
+/**
+ * Builds a Steiner-tree-approximated connection structure over the raw confini sub-areas (BFS
+ * shortest bridge paths + MST, see computeAreaDistances/buildMSTForest), then optimally
+ * partitions it into the fewest groups <= MAX_PISTON_PUSH each (partitionForest). This replaces
+ * a single-bridge-only greedy: a chain of several air cells can now connect two areas that
+ * aren't directly touching, as long as paying for that chain is still worth it.
+ */
+function simulateGrouping(data_layers, rng, areaDistances) {
+    let areaIds = Object.keys(data_layers.support.counter)
+    let mstEdges = buildMSTForest(areaIds, areaDistances.distances, rng)
+    let {nodeWeight, adj} = buildTreeAdjacency(areaIds, data_layers.support.counter, mstEdges, areaDistances.paths)
+    let pieces = partitionForest(nodeWeight, adj, MAX_PISTON_PUSH)
+
+    let sizes = {}, finalGroup = {}, supportGroup = {}
+    for (let piece of pieces) {
+        // the first area node encountered names the group, matching the old "areaLead" convention
+        let leadArea = null
+        for (let id of piece.nodes) if (id.startsWith('area:')) { leadArea = id.slice(5); break }
+        sizes[leadArea] = piece.size
+        for (let id of piece.nodes) {
+            if (id.startsWith('area:')) {
+                finalGroup[id.slice(5)] = leadArea
+            } else {
+                let coords = id.slice(5).replace(',', ' ')
+                supportGroup[coords] = leadArea
+            }
+        }
+    }
     return {sizes, finalGroup, supportGroup}
 }
 
@@ -470,9 +533,12 @@ function evaluateGrouping(data_layers, result) {
  * multiple <=12 chunks is a separate problem, not yet implemented.
  */
 function addSupportBlocksFromList(data_layers, rng) {
+    // distances don't depend on rng - computed once and reused across all trials
+    let areaDistances = computeAreaDistances(data_layers)
+
     let best = null
     for (let trial = 0; trial < GROUPING_TRIALS; trial++) {
-        let result = simulateGrouping(data_layers, rng)
+        let result = simulateGrouping(data_layers, rng, areaDistances)
         let evaluation = evaluateGrouping(data_layers, result)
         if (best === null ||
             (evaluation.bipartite && !best.evaluation.bipartite) ||
@@ -595,8 +661,6 @@ function addSupportBlocks(data_layers, rng) {
     data_layers.support = {}
     // find all subareas given the actual plain configuration
     findSubAreas(data_layers)
-    // find the blocks neighboors to multiple areas
-    findSupportBlockLocations(data_layers)
-    // checks all the proposed support blocks, starting from the ones with the highest amount of different neighboors
+    // builds a Steiner-tree-approximated connection and partitions it into capacity-bound groups
     addSupportBlocksFromList(data_layers, rng)
 }
