@@ -1,0 +1,8 @@
+{
+  "502022184": {
+    "note": "Vena di test salvata su richiesta dell'utente (2026-11-04) - usata per discutere la numerazione dei gruppi e l'indagine sui gruppi isolati.",
+    "seed": 502022184,
+    "size": [15, 15, 15],
+    "ores": [[2,6,6],[2,8,7],[3,4,7],[4,10,11],[5,12,6],[6,2,7],[6,2,8],[6,8,13],[6,9,13],[8,2,7],[9,3,11],[9,13,9],[10,11,4],[10,12,5],[10,12,8],[11,12,8],[12,10,6],[13,7,8],[13,9,9]]
+  }
+}
