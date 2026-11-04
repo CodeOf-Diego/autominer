@@ -344,7 +344,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	setupSettingsMenu()
 
 	ST.setUpCameras()
-	calibrationImage.src = 'reference/screenshots/geode-01.png'
+	calibrationImage.src = PHOTO_DATA.geode01
 	renderStage(currentStage)
 	ST.animate()
 });
