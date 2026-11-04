@@ -12,19 +12,53 @@ let calibrationResult = null
 
 /**
  * Stage 1 manual calibration: automatic Hough detection (calibrationResult below) turned out too
- * noisy on a busy geode screenshot to find real vanishing points, and hand-tracing individual
- * lines was fiddly to get 3+ to agree. Simpler: 2 draggable vanishing-point handles, each with a
- * fan of guide lines fixed to it - the user drags a handle until its fan's rays visibly line up
- * with real block edges in the photo, which is a direct, visual way to do the same job. x/y null
- * means "not placed yet" - renderCalibrationStage() seeds a default position once canvas size is
- * known. Kept across stage switches so repositioning isn't needed every time stage 1 is revisited.
+ * noisy on a busy geode screenshot to find real vanishing points. Instead: 2 draggable lines per
+ * vanishing point (4 total, 8 draggable endpoints) - the user drags each line's endpoints onto a
+ * real block edge they recognize, and that vanishing point is computed live as the intersection
+ * of its 2 lines (lineFromPoints/intersectLines, see js/CalibrationTools.js). Placing lines on
+ * real edges is more precise than dragging an abstract point, since each endpoint can be pinned
+ * exactly where a real edge is. x1 null means "not placed yet" - renderCalibrationStage() seeds
+ * default positions once canvas size is known. Kept across stage switches so repositioning isn't
+ * needed every time stage 1 is revisited.
  */
-let vpHandles = [
-	{ x: null, y: null, color: '#3b82f6' },
-	{ x: null, y: null, color: '#a855f7' },
+let calibLines = [
+	{ x1: null, y1: null, x2: null, y2: null, vp: 0 },
+	{ x1: null, y1: null, x2: null, y2: null, vp: 0 },
+	{ x1: null, y1: null, x2: null, y2: null, vp: 1 },
+	{ x1: null, y1: null, x2: null, y2: null, vp: 1 },
 ]
-let draggingHandle = null // index into vpHandles while the mouse is down over it, null otherwise
+const VP_COLORS = ['#3b82f6', '#a855f7']
+let draggingPoint = null // {line, end} (end: 1 or 2) while dragging an endpoint handle, null otherwise
 let calibrationListenersBound = false
+
+/** Seeds calibLines with default positions (2 roughly non-parallel lines per side), only if unset unless force is true */
+function initCalibLinesDefaults(w, h, force) {
+	if (!force && calibLines[0].x1 !== null) return
+	const FRACS = [
+		[0.05, 0.65, 0.40, 0.30],
+		[0.05, 0.15, 0.40, 0.50],
+		[0.95, 0.65, 0.60, 0.30],
+		[0.95, 0.15, 0.60, 0.50],
+	]
+	calibLines.forEach((line, i) => {
+		let [fx1, fy1, fx2, fy2] = FRACS[i]
+		line.x1 = fx1 * w; line.y1 = fy1 * h; line.x2 = fx2 * w; line.y2 = fy2 * h
+	})
+}
+
+/** The vanishing point for vpIndex (0 or 1): the intersection of its 2 calibLines, or null if they're too close to parallel */
+function computeVP(vpIndex, w, h) {
+	let [a, b] = calibLines.filter((l) => l.vp === vpIndex)
+	let ga = lineFromPoints(a.x1, a.y1, a.x2, a.y2)
+	let gb = lineFromPoints(b.x1, b.y1, b.x2, b.y2)
+	if (!ga || !gb) return null
+	let p = intersectLines(ga, gb)
+	if (Math.abs(p.w) < 1e-6) return null
+	let diag = Math.hypot(w, h)
+	let x = p.x / p.w, y = p.y / p.w
+	if (Math.abs(x) > 30 * diag || Math.abs(y) > 30 * diag) return null // nearly parallel -> wild, meaningless point
+	return { x, y }
+}
 
 /**
  * Step 8: layer-by-layer view. When enabled, renderStage() draws only up to the single world-Y
@@ -165,10 +199,7 @@ function renderCalibrationStage() {
 
 	calibration_canvas.width = calibrationImage.naturalWidth
 	calibration_canvas.height = calibrationImage.naturalHeight
-	if (vpHandles[0].x === null) {
-		vpHandles[0].x = calibration_canvas.width * 0.3; vpHandles[0].y = calibration_canvas.height * 0.4
-		vpHandles[1].x = calibration_canvas.width * 0.7; vpHandles[1].y = calibration_canvas.height * 0.4
-	}
+	initCalibLinesDefaults(calibration_canvas.width, calibration_canvas.height, false)
 	setupCalibrationCanvas()
 	redrawCalibrationCanvas()
 
@@ -193,7 +224,7 @@ function imageCoordsFromEvent(event, canvas) {
 	}
 }
 
-/** Redraws the photo + (optionally) the automatic Hough lines + each VP handle's fan + the handles themselves, and refreshes the stats panel */
+/** Redraws the photo + (optionally) the automatic Hough lines + each defining line (extended + its draggable segment/endpoints) + the computed vanishing points, and refreshes the stats panel */
 function redrawCalibrationCanvas() {
 	let canvas = calibration_canvas
 	let ctx = canvas.getContext('2d')
@@ -208,83 +239,104 @@ function redrawCalibrationCanvas() {
 		}
 	}
 
-	for (let h of vpHandles) drawVanishingFan(ctx, h, canvas.width, canvas.height)
-
-	for (let h of vpHandles) {
-		ctx.fillStyle = h.color
-		ctx.beginPath(); ctx.arc(h.x, h.y, 11, 0, 2 * Math.PI); ctx.fill()
-		ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.stroke()
-	}
-
-	updateCalibrationStats(canvas.width, canvas.height)
-}
-
-/**
- * Draws a fixed "sunburst" of thin guide lines through a vanishing-point handle - every line
- * through that point, sampled at evenly spaced angles, since (unlike the old line-tracing
- * version) there's no real line data to take an angular range from here: the handle's POSITION
- * is the only thing being adjusted, by eye, until enough rays line up with real block edges.
- */
-function drawVanishingFan(ctx, handle, w, h) {
-	const RAY_COUNT = 16
-	const len = Math.max(w, h) * 1.5
-	ctx.strokeStyle = handle.color
-	ctx.globalAlpha = 0.3
-	ctx.lineWidth = 1
-	for (let i = 0; i < RAY_COUNT; i++) {
-		let a = (Math.PI / RAY_COUNT) * i // lines, not rays: 0..PI covers every direction once
-		let dx = Math.cos(a), dy = Math.sin(a)
+	// each line extended well past its own endpoints, thin+faint - so where it's headed (and
+	// whether it agrees with the other block edges beyond the segment itself) is visible at a glance
+	const EXT = Math.max(canvas.width, canvas.height) * 2
+	calibLines.forEach((line) => {
+		let dx = line.x2 - line.x1, dy = line.y2 - line.y1
+		let len = Math.hypot(dx, dy) || 1
+		let ux = dx / len, uy = dy / len
+		ctx.strokeStyle = VP_COLORS[line.vp]
+		ctx.globalAlpha = 0.35
+		ctx.lineWidth = 1
 		ctx.beginPath()
-		ctx.moveTo(handle.x - dx * len, handle.y - dy * len)
-		ctx.lineTo(handle.x + dx * len, handle.y + dy * len)
+		ctx.moveTo(line.x1 - ux * EXT, line.y1 - uy * EXT)
+		ctx.lineTo(line.x2 + ux * EXT, line.y2 + uy * EXT)
 		ctx.stroke()
-	}
-	ctx.globalAlpha = 1
+		ctx.globalAlpha = 1
+	})
+
+	// the actual draggable segment + its 2 endpoint handles, on top and fully opaque
+	calibLines.forEach((line) => {
+		ctx.strokeStyle = VP_COLORS[line.vp]
+		ctx.lineWidth = 3
+		ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2); ctx.stroke()
+		for (let [hx, hy] of [[line.x1, line.y1], [line.x2, line.y2]]) {
+			ctx.fillStyle = VP_COLORS[line.vp]
+			ctx.beginPath(); ctx.arc(hx, hy, 7, 0, 2 * Math.PI); ctx.fill()
+			ctx.strokeStyle = 'black'; ctx.lineWidth = 1.5; ctx.stroke()
+		}
+	})
+
+	let vps = [computeVP(0, canvas.width, canvas.height), computeVP(1, canvas.width, canvas.height)]
+	vps.forEach((vp, i) => {
+		if (!vp) return
+		let x = Math.max(10, Math.min(canvas.width - 10, vp.x))
+		let y = Math.max(10, Math.min(canvas.height - 10, vp.y))
+		ctx.fillStyle = VP_COLORS[i]
+		ctx.beginPath(); ctx.arc(x, y, 9, 0, 2 * Math.PI); ctx.fill()
+		ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke()
+	})
+
+	updateCalibrationStats(vps, canvas.width, canvas.height)
 }
 
-function updateCalibrationStats(w, h) {
-	let cx = w / 2, cy = h / 2
-	let f = calibrateFromPair(vpHandles[0], vpHandles[1], cx, cy)
-	let html = 'Trascina i 2 punti finché i raggi non seguono gli spigoli reali.'
-	if (f !== null) {
-		let vFOV = 2 * Math.atan((h / 2) / f) * 180 / Math.PI
-		html += '<br><b style="color:#4ade80">f=' + f.toFixed(0) + 'px, FOV vert ' + vFOV.toFixed(1) + '&deg;</b>'
+function updateCalibrationStats(vps, w, h) {
+	let html = 'Trascina gli estremi delle linee sugli spigoli reali.'
+	if (!vps[0] || !vps[1]) {
+		html += '<br><span style="color:#f87171">2 linee dello stesso colore troppo parallele</span>'
 	} else {
-		html += '<br><span style="color:#f87171">posizione non valida (i punti devono essere su lati opposti rispetto al centro)</span>'
+		let f = calibrateFromPair(vps[0], vps[1], w / 2, h / 2)
+		if (f !== null) {
+			let vFOV = 2 * Math.atan((h / 2) / f) * 180 / Math.PI
+			html += '<br><b style="color:#4ade80">f=' + f.toFixed(0) + 'px, FOV vert ' + vFOV.toFixed(1) + '&deg;</b>'
+		} else {
+			html += '<br><span style="color:#f87171">posizione non valida</span>'
+		}
 	}
 	calibration_stats.innerHTML = html
 }
 
-/** How close (in image px) the mouse must be to a handle to grab it */
-const HANDLE_GRAB_RADIUS = 25
+/** How close (in image px) the mouse must be to an endpoint handle to grab it */
+const HANDLE_GRAB_RADIUS = 20
 
-/** Wires up dragging the 2 VP handles + the reset/show-auto controls, once */
+/** Wires up dragging the 4 lines' 8 endpoint handles + the reset/show-auto controls, once */
 function setupCalibrationCanvas() {
 	if (calibrationListenersBound) return
 	calibrationListenersBound = true
 	let canvas = calibration_canvas
 
+	function allHandles() {
+		let pts = []
+		for (let line of calibLines) {
+			pts.push({ line, end: 1, x: line.x1, y: line.y1 })
+			pts.push({ line, end: 2, x: line.x2, y: line.y2 })
+		}
+		return pts
+	}
+
 	canvas.addEventListener('mousedown', (e) => {
 		let p = imageCoordsFromEvent(e, canvas)
+		let scale = canvas.width / canvas.getBoundingClientRect().width
 		let closest = null, closestDist = Infinity
-		vpHandles.forEach((h, i) => {
+		for (let h of allHandles()) {
 			let dist = Math.hypot(h.x - p.x, h.y - p.y)
-			if (dist < closestDist) { closestDist = dist; closest = i }
-		})
-		if (closestDist <= HANDLE_GRAB_RADIUS * (canvas.width / canvas.getBoundingClientRect().width)) draggingHandle = closest
+			if (dist < closestDist) { closestDist = dist; closest = h }
+		}
+		if (closest && closestDist <= HANDLE_GRAB_RADIUS * scale) draggingPoint = closest
 	})
 	canvas.addEventListener('mousemove', (e) => {
-		if (draggingHandle === null) return
+		if (!draggingPoint) return
 		let p = imageCoordsFromEvent(e, canvas)
-		vpHandles[draggingHandle].x = p.x; vpHandles[draggingHandle].y = p.y
+		if (draggingPoint.end === 1) { draggingPoint.line.x1 = p.x; draggingPoint.line.y1 = p.y }
+		else { draggingPoint.line.x2 = p.x; draggingPoint.line.y2 = p.y }
 		redrawCalibrationCanvas()
 	})
-	canvas.addEventListener('mouseup', () => { draggingHandle = null })
-	canvas.addEventListener('mouseleave', () => { draggingHandle = null })
+	canvas.addEventListener('mouseup', () => { draggingPoint = null })
+	canvas.addEventListener('mouseleave', () => { draggingPoint = null })
 
 	calibration_reset.addEventListener('click', () => {
-		vpHandles[0].x = canvas.width * 0.3; vpHandles[0].y = canvas.height * 0.4
-		vpHandles[1].x = canvas.width * 0.7; vpHandles[1].y = canvas.height * 0.4
+		initCalibLinesDefaults(canvas.width, canvas.height, true)
 		redrawCalibrationCanvas()
 	})
 	calibration_show_auto.addEventListener('change', redrawCalibrationCanvas)
