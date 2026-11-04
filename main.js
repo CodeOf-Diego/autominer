@@ -11,16 +11,19 @@ let calibrationImage = new Image()
 let calibrationResult = null
 
 /**
- * Stage 1 manual calibration: lines the user traces by hand over block edges they recognize in
- * the photo, since automatic detection (calibrationResult above) turned out too noisy on a busy
- * geode screenshot to find real vanishing points. Each line is colored live by whether it's
- * reached consensus with another line on a vanishing direction (green) or is still an orphan
- * (red) - see redrawCalibrationCanvas(). Kept across stage switches like calibrationResult so
- * retracing isn't needed every time stage 1 is revisited.
+ * Stage 1 manual calibration: automatic Hough detection (calibrationResult below) turned out too
+ * noisy on a busy geode screenshot to find real vanishing points, and hand-tracing individual
+ * lines was fiddly to get 3+ to agree. Simpler: 2 draggable vanishing-point handles, each with a
+ * fan of guide lines fixed to it - the user drags a handle until its fan's rays visibly line up
+ * with real block edges in the photo, which is a direct, visual way to do the same job. x/y null
+ * means "not placed yet" - renderCalibrationStage() seeds a default position once canvas size is
+ * known. Kept across stage switches so repositioning isn't needed every time stage 1 is revisited.
  */
-let userLines = []
-let nextLineId = 0
-let drawingLine = null // {x1,y1,x2,y2} while the mouse is down, null otherwise
+let vpHandles = [
+	{ x: null, y: null, color: '#3b82f6' },
+	{ x: null, y: null, color: '#a855f7' },
+]
+let draggingHandle = null // index into vpHandles while the mouse is down over it, null otherwise
 let calibrationListenersBound = false
 
 /**
@@ -149,7 +152,7 @@ function renderCalibrationStage() {
 	ST.clearGroupLabels()
 	calibration_view.style.display = 'block'
 	// the settings panel (vein density/gap/etc, irrelevant here) covers a big chunk of the left
-	// side of the screen and would swallow clicks meant for line-drawing; 'm' still toggles it back
+	// side of the screen and would swallow drags meant for the VP handles; 'm' still toggles it back
 	settings_menu.style.display = 'none'
 
 	if (stage_info) stage_info.innerHTML = 'Stage 1/' + LAST_STAGE + ' - ' + STAGE_NAMES[1] + ' (tasti 1-' + LAST_STAGE + ' per cambiare)'
@@ -162,6 +165,10 @@ function renderCalibrationStage() {
 
 	calibration_canvas.width = calibrationImage.naturalWidth
 	calibration_canvas.height = calibrationImage.naturalHeight
+	if (vpHandles[0].x === null) {
+		vpHandles[0].x = calibration_canvas.width * 0.3; vpHandles[0].y = calibration_canvas.height * 0.4
+		vpHandles[1].x = calibration_canvas.width * 0.7; vpHandles[1].y = calibration_canvas.height * 0.4
+	}
 	setupCalibrationCanvas()
 	redrawCalibrationCanvas()
 
@@ -186,7 +193,7 @@ function imageCoordsFromEvent(event, canvas) {
 	}
 }
 
-/** Redraws the photo + (optionally) the automatic Hough lines + the user-drawn lines (colored by vanishing-point consensus) + any line mid-drag, and refreshes the stats panel */
+/** Redraws the photo + (optionally) the automatic Hough lines + each VP handle's fan + the handles themselves, and refreshes the stats panel */
 function redrawCalibrationCanvas() {
 	let canvas = calibration_canvas
 	let ctx = canvas.getContext('2d')
@@ -201,64 +208,57 @@ function redrawCalibrationCanvas() {
 		}
 	}
 
-	// recluster from scratch each redraw - cheap at the scale of a hand-drawn line set (tens, not
-	// thousands). A tighter radius than the automatic-detection default (0.04): hand-traced lines
-	// should agree much more precisely than noisy Hough output. Require >=3 members, not just 2 -
-	// any 2 non-parallel lines intersect *somewhere*, so a pair alone is no real evidence of a
-	// shared vanishing point; 3+ independent lines agreeing is the first meaningful signal.
-	let clusters = userLines.length >= 3 ? findVanishingPoints(userLines, canvas.width, canvas.height, 0.015) : []
-	clusters = clusters.filter(c => c.members.length >= 3)
-	let matchedIds = new Set()
-	for (let cl of clusters) for (let m of cl.members) matchedIds.add(m.id)
+	for (let h of vpHandles) drawVanishingFan(ctx, h, canvas.width, canvas.height)
 
-	ctx.lineWidth = 3
-	for (let line of userLines) {
-		ctx.strokeStyle = matchedIds.has(line.id) ? '#22c55e' : '#ef4444'
-		ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2); ctx.stroke()
-	}
-
-	if (drawingLine) {
-		ctx.strokeStyle = '#fbbf24'
-		ctx.setLineDash([8, 6])
-		ctx.beginPath(); ctx.moveTo(drawingLine.x1, drawingLine.y1); ctx.lineTo(drawingLine.x2, drawingLine.y2); ctx.stroke()
-		ctx.setLineDash([])
-	}
-
-	const VP_COLORS = ['#3b82f6', '#a855f7', '#06b6d4', '#eab308']
-	clusters.forEach((cl, i) => {
-		let x = Math.max(10, Math.min(canvas.width - 10, cl.x))
-		let y = Math.max(10, Math.min(canvas.height - 10, cl.y))
-		ctx.fillStyle = VP_COLORS[i % VP_COLORS.length]
-		ctx.beginPath(); ctx.arc(x, y, 9, 0, 2 * Math.PI); ctx.fill()
+	for (let h of vpHandles) {
+		ctx.fillStyle = h.color
+		ctx.beginPath(); ctx.arc(h.x, h.y, 11, 0, 2 * Math.PI); ctx.fill()
 		ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.stroke()
-	})
+	}
 
-	updateCalibrationStats(clusters, matchedIds, canvas.width, canvas.height)
+	updateCalibrationStats(canvas.width, canvas.height)
 }
 
-function updateCalibrationStats(clusters, matchedIds, w, h) {
-	let html = userLines.length + ' linee (' + matchedIds.size + ' con match)<br>' + clusters.length + ' direzion' + (clusters.length === 1 ? 'e' : 'i') + ' trovat' + (clusters.length === 1 ? 'a' : 'e')
-
-	let cx = w / 2, cy = h / 2
-	let best = null
-	for (let i = 0; i < clusters.length; i++) {
-		for (let j = i + 1; j < clusters.length; j++) {
-			let f = calibrateFromPair(clusters[i], clusters[j], cx, cy)
-			if (f === null) continue
-			let n = clusters[i].members.length + clusters[j].members.length
-			if (!best || n > best.n) best = { f, n }
-		}
+/**
+ * Draws a fixed "sunburst" of thin guide lines through a vanishing-point handle - every line
+ * through that point, sampled at evenly spaced angles, since (unlike the old line-tracing
+ * version) there's no real line data to take an angular range from here: the handle's POSITION
+ * is the only thing being adjusted, by eye, until enough rays line up with real block edges.
+ */
+function drawVanishingFan(ctx, handle, w, h) {
+	const RAY_COUNT = 16
+	const len = Math.max(w, h) * 1.5
+	ctx.strokeStyle = handle.color
+	ctx.globalAlpha = 0.3
+	ctx.lineWidth = 1
+	for (let i = 0; i < RAY_COUNT; i++) {
+		let a = (Math.PI / RAY_COUNT) * i // lines, not rays: 0..PI covers every direction once
+		let dx = Math.cos(a), dy = Math.sin(a)
+		ctx.beginPath()
+		ctx.moveTo(handle.x - dx * len, handle.y - dy * len)
+		ctx.lineTo(handle.x + dx * len, handle.y + dy * len)
+		ctx.stroke()
 	}
-	if (best) {
-		let vFOV = 2 * Math.atan((h / 2) / best.f) * 180 / Math.PI
-		html += '<br><b style="color:#4ade80">f=' + best.f.toFixed(0) + 'px, FOV vert ' + vFOV.toFixed(1) + '&deg;</b>'
-	} else if (clusters.length >= 2) {
-		html += '<br><span style="color:#f87171">nessuna coppia ortogonale</span>'
+	ctx.globalAlpha = 1
+}
+
+function updateCalibrationStats(w, h) {
+	let cx = w / 2, cy = h / 2
+	let f = calibrateFromPair(vpHandles[0], vpHandles[1], cx, cy)
+	let html = 'Trascina i 2 punti finché i raggi non seguono gli spigoli reali.'
+	if (f !== null) {
+		let vFOV = 2 * Math.atan((h / 2) / f) * 180 / Math.PI
+		html += '<br><b style="color:#4ade80">f=' + f.toFixed(0) + 'px, FOV vert ' + vFOV.toFixed(1) + '&deg;</b>'
+	} else {
+		html += '<br><span style="color:#f87171">posizione non valida (i punti devono essere su lati opposti rispetto al centro)</span>'
 	}
 	calibration_stats.innerHTML = html
 }
 
-/** Wires up click-drag line drawing + the undo/clear/show-auto controls, once */
+/** How close (in image px) the mouse must be to a handle to grab it */
+const HANDLE_GRAB_RADIUS = 25
+
+/** Wires up dragging the 2 VP handles + the reset/show-auto controls, once */
 function setupCalibrationCanvas() {
 	if (calibrationListenersBound) return
 	calibrationListenersBound = true
@@ -266,28 +266,27 @@ function setupCalibrationCanvas() {
 
 	canvas.addEventListener('mousedown', (e) => {
 		let p = imageCoordsFromEvent(e, canvas)
-		drawingLine = { x1: p.x, y1: p.y, x2: p.x, y2: p.y }
+		let closest = null, closestDist = Infinity
+		vpHandles.forEach((h, i) => {
+			let dist = Math.hypot(h.x - p.x, h.y - p.y)
+			if (dist < closestDist) { closestDist = dist; closest = i }
+		})
+		if (closestDist <= HANDLE_GRAB_RADIUS * (canvas.width / canvas.getBoundingClientRect().width)) draggingHandle = closest
 	})
 	canvas.addEventListener('mousemove', (e) => {
-		if (!drawingLine) return
+		if (draggingHandle === null) return
 		let p = imageCoordsFromEvent(e, canvas)
-		drawingLine.x2 = p.x; drawingLine.y2 = p.y
+		vpHandles[draggingHandle].x = p.x; vpHandles[draggingHandle].y = p.y
 		redrawCalibrationCanvas()
 	})
-	canvas.addEventListener('mouseup', () => {
-		if (!drawingLine) return
-		let length = Math.hypot(drawingLine.x2 - drawingLine.x1, drawingLine.y2 - drawingLine.y1)
-		if (length > 10) userLines.push({ ...drawingLine, length, id: nextLineId++ }) // ignore accidental clicks
-		drawingLine = null
-		redrawCalibrationCanvas()
-	})
-	canvas.addEventListener('mouseleave', () => {
-		drawingLine = null
-		redrawCalibrationCanvas()
-	})
+	canvas.addEventListener('mouseup', () => { draggingHandle = null })
+	canvas.addEventListener('mouseleave', () => { draggingHandle = null })
 
-	calibration_undo.addEventListener('click', () => { userLines.pop(); redrawCalibrationCanvas() })
-	calibration_clear.addEventListener('click', () => { userLines = []; redrawCalibrationCanvas() })
+	calibration_reset.addEventListener('click', () => {
+		vpHandles[0].x = canvas.width * 0.3; vpHandles[0].y = canvas.height * 0.4
+		vpHandles[1].x = canvas.width * 0.7; vpHandles[1].y = canvas.height * 0.4
+		redrawCalibrationCanvas()
+	})
 	calibration_show_auto.addEventListener('change', redrawCalibrationCanvas)
 }
 
