@@ -160,12 +160,19 @@ class SceneTools {
 	 * Draws a small number over each final group's centroid in the 3 orthogonal viewports, so a
 	 * specific group can be pointed at by index ("group 0", "group 5", ...) unambiguously.
 	 * displaySize is the combined display matrix's {x,y,z} dimensions (same as addMeshToScene's
-	 * matrixSize), originalSize is the vein's own {x,y,z} before any blueprint was combined in.
+	 * matrixSize); originalSize is the vein's own {x,y,z}; gap/invert must match whatever was
+	 * passed to Tools3D.buildDisplay() for this render, so labels land where the blueprint
+	 * actually is.
 	 */
-	updateGroupLabels(data_layers, displaySize, originalSize) {
+	updateGroupLabels(data_layers, displaySize, originalSize, gap, invert) {
 		ST.clearGroupLabels();
 		const voxelSize = 1;
 		const pos = { x: 0, y: 1, z: 2 }; // row index of each axis's viewport, matches ST.axes order
+		const shift = {
+			x: invert.x ? gap + 1 : 0,
+			y: invert.y ? gap + 1 : 0,
+			z: invert.z ? gap + 1 : 0,
+		}
 
 		// An axis's blueprint slab is flat on that axis (fixed coordinate) and spread on the
 		// other two - so it only renders as a readable 2D shape through the camera whose own
@@ -183,9 +190,9 @@ class SceneTools {
 
 			for (let label of data_layers[axis].groupLabels) {
 				let world = { x: 0, y: 0, z: 0 };
-				world[axis] = originalSize[axis] + BLUEPRINT_GAP;
-				world[ppd[0]] = label.i;
-				world[ppd[1]] = label.j;
+				world[axis] = invert[axis] ? 0 : (originalSize[axis] + shift[axis] + gap);
+				world[ppd[0]] = shift[ppd[0]] + label.i;
+				world[ppd[1]] = shift[ppd[1]] + label.j;
 
 				let point = new THREE.Vector3(
 					(world.x - displaySize.x / 2) * voxelSize,

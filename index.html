@@ -25,5 +25,34 @@
   <body>
     <span id="debug_info" style="position: absolute;z-index: 10; color: white;font-size: 24px;"></span>
     <span id="stage_info" style="position: absolute;z-index: 10; bottom: 10px; left: 10px; color: white;font-size: 20px;"></span>
+
+    <div id="settings_menu" style="position:absolute; z-index:20; left:10px; top:170px; width:270px; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:13px; padding:10px; border-radius:6px;">
+      <div style="font-weight:bold; margin-bottom:8px;">Impostazioni generazione (tasto 'm')</div>
+
+      <label>Densità ore: <span id="density_val"></span></label><br>
+      <input type="range" id="density_slider" min="0.01" max="0.3" step="0.01" style="width:100%"><br>
+
+      <label>Range (spessore guscio): <span id="range_val"></span></label><br>
+      <input type="range" id="range_slider" min="0.5" max="5" step="0.1" style="width:100%"><br>
+
+      <label>Distanza macchine dal geoide: <span id="gap_val"></span></label><br>
+      <input type="range" id="gap_slider" min="0" max="6" step="1" style="width:100%"><br>
+
+      <label>Preferenza slime/honey: <span id="slime_pref_val"></span></label><br>
+      <input type="range" id="slime_pref_slider" min="0" max="100" step="1" style="width:100%"><br>
+
+      <div style="margin-top:8px;">
+        <label><input type="checkbox" id="invert_x"> Inverti asse X</label><br>
+        <label><input type="checkbox" id="invert_y"> Inverti asse Y</label><br>
+        <label><input type="checkbox" id="invert_z"> Inverti asse Z</label>
+      </div>
+
+      <div style="margin-top:8px;">
+        <label>Import JSON ({seed,size,ores} o {seed,vein}):</label><br>
+        <textarea id="import_json" rows="3" style="width:100%; font-size:11px; box-sizing:border-box;"></textarea>
+      </div>
+
+      <button id="generate_btn" style="width:100%; margin-top:8px; padding:6px;">Generate</button>
+    </div>
   </body>
 </html>

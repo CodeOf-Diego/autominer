@@ -99,6 +99,39 @@ class ToolsMatrix3D {
             matrix1.set(i.x + max.x,i.y + max.y,i.z + max.z,matrix2.GET())
         })
     }
+
+    /**
+     * Builds the full display matrix: the vein plus all 3 axis blueprints. By default each
+     * blueprint sits `gap` blocks past the vein's edge on the high side of its axis (like
+     * combineVolumes). When an axis is inverted, its blueprint instead sits on the LOW side
+     * (before the vein) - since array indices can't go negative, the vein (and everything
+     * else) is shifted forward along that axis to make room, so every index stays >= 0.
+     * @param {Matrix3D} vein
+     * @param {{x:Matrix2D,y:Matrix2D,z:Matrix2D}} blueprintPlains one plain per axis
+     * @param {number} gap blocks of separation between the vein and each blueprint
+     * @param {{x:boolean,y:boolean,z:boolean}} invert true to place that axis's blueprint before the vein instead of after
+     */
+    buildDisplay(vein, blueprintPlains, gap, invert) {
+        let originalDim = { x: vein.maxX(), y: vein.maxY(), z: vein.maxZ() }
+        let shift = {
+            x: invert.x ? gap + 1 : 0,
+            y: invert.y ? gap + 1 : 0,
+            z: invert.z ? gap + 1 : 0,
+        }
+        let display = new Matrix3D()
+        vein.loop((i) => {
+            display.set(i.x + shift.x, i.y + shift.y, i.z + shift.z, vein.GET())
+        })
+        for (let axis of ['x', 'y', 'z']) {
+            let blueprint = this.plainToVolume(blueprintPlains[axis], axis)
+            let offset = { x: shift.x, y: shift.y, z: shift.z }
+            offset[axis] = invert[axis] ? 0 : (originalDim[axis] + shift[axis] + gap)
+            blueprint.loop((i) => {
+                display.set(i.x + offset.x, i.y + offset.y, i.z + offset.z, blueprint.GET())
+            })
+        }
+        return display
+    }
 }
 
 const Tools3D = new ToolsMatrix3D

@@ -6,6 +6,15 @@ var d={}
 let pipeline = null
 let currentStage = 5
 
+/** Generation/layout settings, editable from the settings menu (index.html + setupSettingsMenu() below) */
+let settings = {
+	density: 0.05,  // fraction of shell cells that become amethyst
+	range: 2.3,     // shell thickness tolerance
+	gap: 1,         // blocks of separation between the vein and each axis's blueprint
+	invert: { x: false, y: false, z: false }, // build that axis's blueprint before the vein instead of after
+	slimePreference: 100, // 0 = max honey, 100 = max slime. UI only for now, not yet wired into the grouping algorithm
+}
+
 const STAGE_NAMES = {
 	1: 'Geoide',
 	2: 'Confini stretti',
@@ -66,10 +75,10 @@ function processVein(vein, seed) {
 	pipeline = { vein, data_layers, seed }
 }
 
-/** Generates a new random vein + grouping from a fresh (or given) seed */
+/** Generates a new random vein + grouping from a fresh (or given) seed, using the current settings */
 function newRun(seed) {
 	if (seed === undefined) seed = Math.floor(Math.random() * 0xffffffff)
-	let vein = generateRandomVein(seed)
+	let vein = generateRandomVein(seed, settings.density, settings.range)
 	processVein(vein, seed)
 }
 
@@ -107,16 +116,18 @@ function renderStage(stage) {
 	currentStage = stage
 	ST.clearScene()
 
-	let display = pipeline.vein.clone()
-	if (stage > 1) {
+	let display
+	if (stage === 1) {
+		display = pipeline.vein.clone()
+	} else {
+		let snapshots = {}
 		for (let axis of ['x','y','z']) {
-			let snapshot = stage === 2 ? pipeline.data_layers[axis].snapshotStretti
+			snapshots[axis] = stage === 2 ? pipeline.data_layers[axis].snapshotStretti
 				: stage === 3 ? pipeline.data_layers[axis].snapshotValide
 				: stage === 4 ? pipeline.data_layers[axis].snapshotGruppi
 				: pipeline.data_layers[axis].snapshotMateriali
-			let blueprint = Tools3D.plainToVolume(snapshot, axis)
-			Tools3D.combineVolumes(display, blueprint, axis)
 		}
+		display = Tools3D.buildDisplay(pipeline.vein, snapshots, settings.gap, settings.invert)
 	}
 	ST.addMeshToScene(display)
 
@@ -125,7 +136,9 @@ function renderStage(stage) {
 		ST.updateGroupLabels(
 			pipeline.data_layers,
 			{ x: display.maxX(), y: display.maxY(), z: display.maxZ() },
-			{ x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() }
+			{ x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() },
+			settings.gap,
+			settings.invert
 		)
 	} else {
 		ST.clearGroupLabels()
@@ -135,6 +148,72 @@ function renderStage(stage) {
 		stage_info.innerHTML = 'Stage ' + stage + '/5 - ' + STAGE_NAMES[stage] + ' (tasti 1-5 per cambiare)'
 }
 
+/** 0 -> "100% honey", 100 -> "100% slime", in between -> the split, e.g. "70% slime / 30% honey" */
+function formatSlimePreference(value) {
+	if (value === 100) return '100% slime'
+	if (value === 0) return '100% honey'
+	return value + '% slime / ' + (100 - value) + '% honey'
+}
+
+/**
+ * Wires up the settings menu (index.html #settings_menu): sliders for density/range/gap,
+ * invert checkboxes, a JSON import textarea, and the Generate button. Density/range only take
+ * effect on Generate (regenerating is not cheap enough to do on every slider tick); gap/invert
+ * re-render immediately since they're free (no recomputation, just where things are drawn).
+ */
+function setupSettingsMenu() {
+	density_slider.value = settings.density
+	density_val.textContent = settings.density.toFixed(2)
+	range_slider.value = settings.range
+	range_val.textContent = settings.range.toFixed(1)
+	gap_slider.value = settings.gap
+	gap_val.textContent = settings.gap
+	slime_pref_slider.value = settings.slimePreference
+	slime_pref_val.textContent = formatSlimePreference(settings.slimePreference)
+
+	density_slider.addEventListener('input', () => {
+		settings.density = parseFloat(density_slider.value)
+		density_val.textContent = settings.density.toFixed(2)
+	})
+	range_slider.addEventListener('input', () => {
+		settings.range = parseFloat(range_slider.value)
+		range_val.textContent = settings.range.toFixed(1)
+	})
+	gap_slider.addEventListener('input', () => {
+		settings.gap = parseInt(gap_slider.value)
+		gap_val.textContent = settings.gap
+		if (pipeline !== null) renderStage(currentStage)
+	})
+	slime_pref_slider.addEventListener('input', () => {
+		settings.slimePreference = parseInt(slime_pref_slider.value)
+		slime_pref_val.textContent = formatSlimePreference(settings.slimePreference)
+	})
+	for (let axis of ['x','y','z']) {
+		let checkbox = document.getElementById('invert_' + axis)
+		checkbox.addEventListener('change', () => {
+			settings.invert[axis] = checkbox.checked
+			if (pipeline !== null) renderStage(currentStage)
+		})
+	}
+
+	generate_btn.addEventListener('click', () => {
+		let json = import_json.value.trim()
+		if (json) {
+			let parsed
+			try {
+				parsed = veinFromExport(JSON.parse(json))
+			} catch (e) {
+				flashStageMessage('JSON non valido: ' + e.message)
+				return
+			}
+			processVein(parsed.vein, parsed.seed)
+		} else {
+			newRun()
+		}
+		addDebugInfo()
+		renderStage(currentStage)
+	})
+}
 
 window.addEventListener(`DOMContentLoaded`, () => {
 	ST.new()
@@ -143,6 +222,7 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	// vein = veinXX
 
 	addDebugInfo()
+	setupSettingsMenu()
 
 	ST.setUpCameras()
 	renderStage(currentStage)
@@ -150,6 +230,9 @@ window.addEventListener(`DOMContentLoaded`, () => {
 });
 
 document.addEventListener('keydown', (event) => {
+	// don't let typing in the settings menu's inputs trigger these shortcuts
+	if (['INPUT','TEXTAREA'].includes(event.target.tagName)) return
+
 	if (event.key === 'r') {
 		newRun()
 		addDebugInfo()
@@ -157,6 +240,9 @@ document.addEventListener('keydown', (event) => {
 	}
 	if (event.key === 'i') {
 		debug_info.style.display = (debug_info.style.display == 'none') ? 'block' : 'none';
+	}
+	if (event.key === 'm') {
+		settings_menu.style.display = (settings_menu.style.display == 'none') ? 'block' : 'none';
 	}
 	if (['1','2','3','4','5'].includes(event.key)) {
 		renderStage(parseInt(event.key))

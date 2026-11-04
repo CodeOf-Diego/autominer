@@ -22,16 +22,14 @@ function makePRNG(seed) {
     }
 }
 
-/** Generates a matrix representing a random vein with default attributes */
-function generateRandomVein(seed) {
+/** Generates a matrix representing a random vein. density and range default to the original fixed values */
+function generateRandomVein(seed, density=0.05, range=2.3) {
     let rng = makePRNG(seed)
     let ores = 0
 
     let rad = 5.5
     let max = (rad*2)+4
     let mid = max/2
-    let range = 2.3
-    let density = 0.05
 
     let x,y,z
     let vein = []
