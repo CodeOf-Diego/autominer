@@ -531,6 +531,33 @@ function buildGroupPlain(data_layers) {
 }
 
 /**
+ * Builds a plain where every ADJACENT/SUPPORT cell holds its material (slime/honey, offset by
+ * MATERIAL_ID_OFFSET) instead of its individual group id - the 2-color view of the same final
+ * grouping, showing which cells can physically touch each other without sticking together.
+ */
+const MATERIAL_ID_OFFSET = 2000
+function buildMaterialPlain(data_layers) {
+    let plain = data_layers.plain
+    let areas = data_layers.support.areas
+    let finalGroup = data_layers.support.finalGroup
+    let supportGroup = data_layers.support.supportGroup
+    let groupMaterial = data_layers.support.groupMaterial
+    let materialPlain = new Matrix2D()
+    plain.loop((i) => {
+        let cell = plain.get(i.i,i.j)
+        let value = undefined
+        if (cell == Plains.ADJACENT) {
+            value = MATERIAL_ID_OFFSET + groupMaterial[finalGroup[areas.get(i.i,i.j)]]
+        }
+        else if (cell == Plains.SUPPORT) {
+            value = MATERIAL_ID_OFFSET + groupMaterial[finalGroup[supportGroup[i.i+' '+i.j]]]
+        }
+        materialPlain.set(i.i,i.j, value)
+    })
+    return materialPlain
+}
+
+/**
  * Tries to find the optimal solution of support blocks to add to the blueprint so that all sticky blocks are connected
  */
 function addSupportBlocks(data_layers, rng) {

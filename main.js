@@ -4,13 +4,14 @@ var d={}
 
 /** Holds the last computed vein + per-axis data, so renderStage() can redraw any stage without recomputing */
 let pipeline = null
-let currentStage = 4
+let currentStage = 5
 
 const STAGE_NAMES = {
 	1: 'Geoide',
 	2: 'Confini stretti',
 	3: 'Confini validi',
 	4: 'Raggruppamenti (max 12 blocchi)',
+	5: 'Materiali (slime/honey)',
 }
 
 /**
@@ -48,6 +49,7 @@ function processVein(vein, seed) {
 
 		addSupportBlocks(data_layers[axis], axisRng[axis])
 		data_layers[axis].snapshotGruppi = buildGroupPlain(data_layers[axis]) // stage 4
+		data_layers[axis].snapshotMateriali = buildMaterialPlain(data_layers[axis]) // stage 5
 	}
 
 	vein.set(2,2,2,Voxels.RED)
@@ -89,7 +91,7 @@ function exportVein() {
 	})
 }
 
-/** Renders one stage of the pipeline (1-4) from the already computed snapshots */
+/** Renders one stage of the pipeline (1-5) from the already computed snapshots */
 function renderStage(stage) {
 	if (pipeline === null) return
 	currentStage = stage
@@ -100,7 +102,8 @@ function renderStage(stage) {
 		for (let axis of ['x','y','z']) {
 			let snapshot = stage === 2 ? pipeline.data_layers[axis].snapshotStretti
 				: stage === 3 ? pipeline.data_layers[axis].snapshotValide
-				: pipeline.data_layers[axis].snapshotGruppi
+				: stage === 4 ? pipeline.data_layers[axis].snapshotGruppi
+				: pipeline.data_layers[axis].snapshotMateriali
 			let blueprint = Tools3D.plainToVolume(snapshot, axis)
 			Tools3D.combineVolumes(display, blueprint, axis)
 		}
@@ -108,7 +111,7 @@ function renderStage(stage) {
 	ST.addMeshToScene(display)
 
 	if (stage_info)
-		stage_info.innerHTML = 'Stage ' + stage + '/4 - ' + STAGE_NAMES[stage] + ' (tasti 1-4 per cambiare)'
+		stage_info.innerHTML = 'Stage ' + stage + '/5 - ' + STAGE_NAMES[stage] + ' (tasti 1-5 per cambiare)'
 }
 
 
@@ -134,7 +137,7 @@ document.addEventListener('keydown', (event) => {
 	if (event.key === 'i') {
 		debug_info.style.display = (debug_info.style.display == 'none') ? 'block' : 'none';
 	}
-	if (['1','2','3','4'].includes(event.key)) {
+	if (['1','2','3','4','5'].includes(event.key)) {
 		renderStage(parseInt(event.key))
 	}
 	if (event.key === 'e') {

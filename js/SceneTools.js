@@ -94,17 +94,30 @@ class SceneTools {
 		voxelMaterial[Voxels.RED] = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 
 		// Cells >= GROUP_ID_OFFSET (see BuildingTools.js) are a final group id rather than a
-		// voxel/plain type - give each distinct group its own color, spread with the golden angle.
-		// Hues are kept inside [45, 275] so they stay well clear of the fixed red debug marker
-		// (hue 0) and the magenta/purple amethyst color (hue ~308), and never get confused with them.
-		let groupMaterial = {}
-		const GROUP_HUE_MIN = 45, GROUP_HUE_MAX = 275
+		// voxel/plain type. Fixed palette instead of a computed hue: a formula can place two
+		// groups' colors close enough to look like one big group, especially with few groups in
+		// a reduced hue range. Colors are assigned in first-encounter order so neighboring group
+		// ids don't land next to each other in the cycle, and stay well clear of the fixed red
+		// debug marker and the magenta/purple amethyst color.
+		const GROUP_PALETTE = [0x2563eb, 0x16a34a, 0xf59e0b, 0x7c3aed, 0x06b6d4, 0xca8a04, 0x0d9488, 0x6366f1]
+		let groupColorCache = {}
 		function materialForGroup(groupId) {
-			if (groupMaterial[groupId] === undefined) {
-				let hue = GROUP_HUE_MIN + ((groupId * 137.508) % (GROUP_HUE_MAX - GROUP_HUE_MIN))
-				groupMaterial[groupId] = new THREE.MeshBasicMaterial({ color: new THREE.Color(`hsl(${hue}, 85%, 55%)`) });
+			if (groupColorCache[groupId] === undefined) {
+				let color = GROUP_PALETTE[Object.keys(groupColorCache).length % GROUP_PALETTE.length]
+				groupColorCache[groupId] = new THREE.MeshBasicMaterial({ color })
 			}
-			return groupMaterial[groupId]
+			return groupColorCache[groupId]
+		}
+
+		// Cells >= MATERIAL_ID_OFFSET (see BuildingTools.js) are the 2-color slime/honey view:
+		// green for material 0, yellow for material 1.
+		let materialColorCache = {}
+		const MATERIAL_COLORS = { 0: 0x16a34a, 1: 0xeab308 }
+		function materialForMaterial(matId) {
+			if (materialColorCache[matId] === undefined) {
+				materialColorCache[matId] = new THREE.MeshBasicMaterial({ color: MATERIAL_COLORS[matId] })
+			}
+			return materialColorCache[matId]
 		}
 
 		// Create a new Three.js voxel mesh array
@@ -113,9 +126,10 @@ class SceneTools {
 		// Loop through the matrix and create a voxel mesh for each cell
 		vein.loop((i)=> {
 			let cell = vein.GET()
-			let material = typeof cell === 'number' && cell >= GROUP_ID_OFFSET
-				? materialForGroup(cell)
-				: voxelMaterial[cell]
+			let material
+			if (typeof cell === 'number' && cell >= MATERIAL_ID_OFFSET) material = materialForMaterial(cell - MATERIAL_ID_OFFSET)
+			else if (typeof cell === 'number' && cell >= GROUP_ID_OFFSET) material = materialForGroup(cell)
+			else material = voxelMaterial[cell]
 			if (material !== undefined) {
 				let voxelMesh = new THREE.Mesh(voxelGeometry, material);
 				voxelMesh.position.set(
