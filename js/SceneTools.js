@@ -203,7 +203,8 @@ class SceneTools {
 				el.style.position = 'absolute';
 				el.style.zIndex = 11;
 				el.style.color = 'white';
-				el.style.fontSize = '13px';
+				el.style.opacity = '0.65';
+				el.style.fontSize = '39px';
 				el.style.fontWeight = 'bold';
 				el.style.textShadow = '0 0 2px black, 0 0 2px black';
 				el.style.left = screenX + 'px';
