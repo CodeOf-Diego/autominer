@@ -1,34 +1,44 @@
 /**
  * Flying machine template, transcribed block-by-block from the Geodesy mod's source
- * (GeodesyCore.java::buildMachine(), github.com/kosmolot-mods/geodesy). a = steps outward
- * from the geode along the push axis, u = steps across the 3-wide cross section.
+ * (GeodesyCore.java::buildMachine(), github.com/kosmolot-mods/geodesy - verified against the
+ * raw setBlock() calls, not just the method's ASCII-art comment). a = steps outward from the
+ * geode along the push axis, u = steps across the 3-wide cross section.
+ *
+ * a=0's obsidian is a FIXED anchor, not part of the moving body (it's placed once from a
+ * player-set marker and never touched again). a=1 is deliberately left empty: the mod clears
+ * the player's marker block there and leaves it as air, because that's the gap the a=2 piston
+ * (facing back toward the obsidian) needs in order to extend at all - a sticky piston can't
+ * push an immovable block like obsidian, so without this 1-block gap it would be wedged
+ * against the wall and could never fire.
  *
  * 'piston' is always a plain sticky piston (not a material choice). 'opposite' cells are
  * built from whichever sticky material (slime/honey) is NOT the group's own material - this
  * matches the mod's swap, presumably so the machine's own body doesn't fuse with the group
- * it's pushing. 'slime' cells (the far end, a=5-7) are always literal slime regardless of
- * the group's material, same as the source.
+ * it's pushing. 'slime' cells (the far end, a=6-8) are always literal slime regardless of
+ * the group's material, same as the source. The a=9 obsidian at the far end has no such gap
+ * (the source places it flush against the last slime block) since nothing there pushes toward it.
  */
 const MACHINE_TEMPLATE = [
     {a:0, u:0, type:'obsidian'},
-    {a:1, u:0, type:'piston', facing:'-along'},
-    {a:1, u:1, type:'opposite'},
-    {a:1, u:2, type:'opposite'},
-    {a:2, u:0, type:'lamp'},
-    {a:2, u:1, type:'observer', facing:'up'},
+    // a:1 intentionally has no entries - see the gap explanation above
+    {a:2, u:0, type:'piston', facing:'-along'},
+    {a:2, u:1, type:'opposite'},
     {a:2, u:2, type:'opposite'},
-    {a:3, u:0, type:'observer', facing:'-along'},
-    {a:3, u:1, type:'opposite'},
+    {a:3, u:0, type:'lamp'},
+    {a:3, u:1, type:'observer', facing:'up'},
     {a:3, u:2, type:'opposite'},
-    {a:4, u:0, type:'piston', facing:'along'},
+    {a:4, u:0, type:'observer', facing:'-along'},
     {a:4, u:1, type:'opposite'},
-    {a:5, u:0, type:'slime'},
-    {a:5, u:1, type:'piston', facing:'-along'},
+    {a:4, u:2, type:'opposite'},
+    {a:5, u:0, type:'piston', facing:'along'},
+    {a:5, u:1, type:'opposite'},
     {a:6, u:0, type:'slime'},
-    {a:6, u:1, type:'observer', facing:'along'},
+    {a:6, u:1, type:'piston', facing:'-along'},
     {a:7, u:0, type:'slime'},
-    {a:7, u:1, type:'note'},
-    {a:8, u:0, type:'obsidian'},
+    {a:7, u:1, type:'observer', facing:'along'},
+    {a:8, u:0, type:'slime'},
+    {a:8, u:1, type:'note'},
+    {a:9, u:0, type:'obsidian'},
 ]
 
 /**
