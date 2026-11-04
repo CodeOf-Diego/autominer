@@ -23,7 +23,6 @@
 	<script src="js/SceneTools.js" defer></script>
 	<script src="js/PhotoData.js" defer></script>
 	<script src="js/CalibrationTools.js" defer></script>
-	<script src="js/test4.js" defer></script>
 	<script src="main.js" defer></script>
 	<!-- stage 1 (photo + detected lines): downloads lazily in the background, a few MB -->
 	<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
@@ -34,7 +33,15 @@
 
     <!-- stage 1 only: photo + detected lines, in place of the 3D scene -->
     <div id="calibration_view" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:5; background:black; overflow:auto;">
-      <canvas id="calibration_canvas" style="max-width:100%;"></canvas>
+      <canvas id="calibration_canvas" style="max-width:100%; cursor:crosshair;"></canvas>
+      <div id="calibration_panel" style="position:absolute; top:10px; right:10px; z-index:6; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:12px; padding:10px; border-radius:6px; width:220px;">
+        <div style="font-weight:bold; margin-bottom:6px;">Linee manuali</div>
+        <div>Trascina sulla foto per tracciare una linea lungo uno spigolo che riconosci (verde = coerente con altre linee, rosso = ancora isolata).</div>
+        <div id="calibration_stats" style="margin-top:8px;"></div>
+        <button id="calibration_undo" style="margin-top:8px; width:100%;">Annulla ultima</button>
+        <button id="calibration_clear" style="margin-top:4px; width:100%;">Cancella tutte</button>
+        <label style="display:block; margin-top:8px;"><input type="checkbox" id="calibration_show_auto"> Mostra linee automatiche</label>
+      </div>
     </div>
 
     <div id="settings_menu" style="position:absolute; z-index:20; left:10px; top:170px; width:270px; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:13px; padding:10px; border-radius:6px;">

@@ -96,8 +96,9 @@ function detectLines(img, params) {
  * on the one real screenshot tried so far it didn't converge to a valid orthogonal pair, see
  * README.md.
  */
-function findVanishingPoints(segments, imgW, imgH) {
+function findVanishingPoints(segments, imgW, imgH, radiusFraction) {
     let diag = Math.sqrt(imgW * imgW + imgH * imgH)
+    radiusFraction = radiusFraction || 0.04
     let lines = segments.map(s => ({ ...s, geo: lineFromPoints(s.x1, s.y1, s.x2, s.y2) })).filter(s => s.geo)
 
     const MAX_LINES = 220
@@ -120,7 +121,7 @@ function findVanishingPoints(segments, imgW, imgH) {
         }
     }
 
-    let clusterRadius = diag * 0.04
+    let clusterRadius = diag * radiusFraction
     let grid = new Map()
     candidates.forEach((c, idx) => {
         let key = Math.round(c.x / clusterRadius) + ',' + Math.round(c.y / clusterRadius)

@@ -11,6 +11,19 @@ let calibrationImage = new Image()
 let calibrationResult = null
 
 /**
+ * Stage 1 manual calibration: lines the user traces by hand over block edges they recognize in
+ * the photo, since automatic detection (calibrationResult above) turned out too noisy on a busy
+ * geode screenshot to find real vanishing points. Each line is colored live by whether it's
+ * reached consensus with another line on a vanishing direction (green) or is still an orphan
+ * (red) - see redrawCalibrationCanvas(). Kept across stage switches like calibrationResult so
+ * retracing isn't needed every time stage 1 is revisited.
+ */
+let userLines = []
+let nextLineId = 0
+let drawingLine = null // {x1,y1,x2,y2} while the mouse is down, null otherwise
+let calibrationListenersBound = false
+
+/**
  * Step 8: layer-by-layer view. When enabled, renderStage() draws only up to the single world-Y
  * slice `y` (of whichever stage is current), fading the layers below it instead of hiding them -
  * so a build can be followed and verified in Minecraft one horizontal layer at a time, the way
@@ -135,19 +148,9 @@ function renderCalibrationStage() {
 	ST.set3DVisible(false)
 	ST.clearGroupLabels()
 	calibration_view.style.display = 'block'
-
-	let canvas = calibration_canvas
-	let draw = () => {
-		canvas.width = calibrationImage.naturalWidth
-		canvas.height = calibrationImage.naturalHeight
-		let ctx = canvas.getContext('2d')
-		ctx.drawImage(calibrationImage, 0, 0)
-		ctx.lineWidth = 2
-		ctx.strokeStyle = '#4ade80'
-		for (let s of calibrationResult.segments) {
-			ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke()
-		}
-	}
+	// the settings panel (vein density/gap/etc, irrelevant here) covers a big chunk of the left
+	// side of the screen and would swallow clicks meant for line-drawing; 'm' still toggles it back
+	settings_menu.style.display = 'none'
 
 	if (stage_info) stage_info.innerHTML = 'Stage 1/' + LAST_STAGE + ' - ' + STAGE_NAMES[1] + ' (tasti 1-' + LAST_STAGE + ' per cambiare)'
 
@@ -156,16 +159,136 @@ function renderCalibrationStage() {
 		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 200)
 		return
 	}
-	if (!cvReady) {
-		if (stage_info) stage_info.innerHTML += ' | caricamento OpenCV.js...'
-		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 500)
-		return
-	}
+
+	calibration_canvas.width = calibrationImage.naturalWidth
+	calibration_canvas.height = calibrationImage.naturalHeight
+	setupCalibrationCanvas()
+	redrawCalibrationCanvas()
+
+	// automatic Hough detection (for the optional "mostra linee automatiche" overlay) runs in the
+	// background - manual line drawing works immediately and doesn't need to wait for it
 	if (calibrationResult === null) {
+		if (!cvReady) {
+			setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 500)
+			return
+		}
 		calibrationResult = { segments: detectLines(calibrationImage) }
+		redrawCalibrationCanvas()
 	}
-	draw()
-	if (stage_info) stage_info.innerHTML += ' | ' + calibrationResult.segments.length + ' segmenti rilevati'
+}
+
+/** Converts a mouse event over calibration_canvas into image-pixel coordinates, accounting for the canvas being CSS-scaled down (max-width:100%) from its natural resolution */
+function imageCoordsFromEvent(event, canvas) {
+	let rect = canvas.getBoundingClientRect()
+	return {
+		x: (event.clientX - rect.left) * (canvas.width / rect.width),
+		y: (event.clientY - rect.top) * (canvas.height / rect.height),
+	}
+}
+
+/** Redraws the photo + (optionally) the automatic Hough lines + the user-drawn lines (colored by vanishing-point consensus) + any line mid-drag, and refreshes the stats panel */
+function redrawCalibrationCanvas() {
+	let canvas = calibration_canvas
+	let ctx = canvas.getContext('2d')
+	ctx.clearRect(0, 0, canvas.width, canvas.height)
+	ctx.drawImage(calibrationImage, 0, 0)
+
+	if (calibration_show_auto.checked && calibrationResult) {
+		ctx.lineWidth = 1
+		ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+		for (let s of calibrationResult.segments) {
+			ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke()
+		}
+	}
+
+	// recluster from scratch each redraw - cheap at the scale of a hand-drawn line set (tens, not
+	// thousands). A tighter radius than the automatic-detection default (0.04): hand-traced lines
+	// should agree much more precisely than noisy Hough output. Require >=3 members, not just 2 -
+	// any 2 non-parallel lines intersect *somewhere*, so a pair alone is no real evidence of a
+	// shared vanishing point; 3+ independent lines agreeing is the first meaningful signal.
+	let clusters = userLines.length >= 3 ? findVanishingPoints(userLines, canvas.width, canvas.height, 0.015) : []
+	clusters = clusters.filter(c => c.members.length >= 3)
+	let matchedIds = new Set()
+	for (let cl of clusters) for (let m of cl.members) matchedIds.add(m.id)
+
+	ctx.lineWidth = 3
+	for (let line of userLines) {
+		ctx.strokeStyle = matchedIds.has(line.id) ? '#22c55e' : '#ef4444'
+		ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2); ctx.stroke()
+	}
+
+	if (drawingLine) {
+		ctx.strokeStyle = '#fbbf24'
+		ctx.setLineDash([8, 6])
+		ctx.beginPath(); ctx.moveTo(drawingLine.x1, drawingLine.y1); ctx.lineTo(drawingLine.x2, drawingLine.y2); ctx.stroke()
+		ctx.setLineDash([])
+	}
+
+	const VP_COLORS = ['#3b82f6', '#a855f7', '#06b6d4', '#eab308']
+	clusters.forEach((cl, i) => {
+		let x = Math.max(10, Math.min(canvas.width - 10, cl.x))
+		let y = Math.max(10, Math.min(canvas.height - 10, cl.y))
+		ctx.fillStyle = VP_COLORS[i % VP_COLORS.length]
+		ctx.beginPath(); ctx.arc(x, y, 9, 0, 2 * Math.PI); ctx.fill()
+		ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.stroke()
+	})
+
+	updateCalibrationStats(clusters, matchedIds, canvas.width, canvas.height)
+}
+
+function updateCalibrationStats(clusters, matchedIds, w, h) {
+	let html = userLines.length + ' linee (' + matchedIds.size + ' con match)<br>' + clusters.length + ' direzion' + (clusters.length === 1 ? 'e' : 'i') + ' trovat' + (clusters.length === 1 ? 'a' : 'e')
+
+	let cx = w / 2, cy = h / 2
+	let best = null
+	for (let i = 0; i < clusters.length; i++) {
+		for (let j = i + 1; j < clusters.length; j++) {
+			let f = calibrateFromPair(clusters[i], clusters[j], cx, cy)
+			if (f === null) continue
+			let n = clusters[i].members.length + clusters[j].members.length
+			if (!best || n > best.n) best = { f, n }
+		}
+	}
+	if (best) {
+		let vFOV = 2 * Math.atan((h / 2) / best.f) * 180 / Math.PI
+		html += '<br><b style="color:#4ade80">f=' + best.f.toFixed(0) + 'px, FOV vert ' + vFOV.toFixed(1) + '&deg;</b>'
+	} else if (clusters.length >= 2) {
+		html += '<br><span style="color:#f87171">nessuna coppia ortogonale</span>'
+	}
+	calibration_stats.innerHTML = html
+}
+
+/** Wires up click-drag line drawing + the undo/clear/show-auto controls, once */
+function setupCalibrationCanvas() {
+	if (calibrationListenersBound) return
+	calibrationListenersBound = true
+	let canvas = calibration_canvas
+
+	canvas.addEventListener('mousedown', (e) => {
+		let p = imageCoordsFromEvent(e, canvas)
+		drawingLine = { x1: p.x, y1: p.y, x2: p.x, y2: p.y }
+	})
+	canvas.addEventListener('mousemove', (e) => {
+		if (!drawingLine) return
+		let p = imageCoordsFromEvent(e, canvas)
+		drawingLine.x2 = p.x; drawingLine.y2 = p.y
+		redrawCalibrationCanvas()
+	})
+	canvas.addEventListener('mouseup', () => {
+		if (!drawingLine) return
+		let length = Math.hypot(drawingLine.x2 - drawingLine.x1, drawingLine.y2 - drawingLine.y1)
+		if (length > 10) userLines.push({ ...drawingLine, length, id: nextLineId++ }) // ignore accidental clicks
+		drawingLine = null
+		redrawCalibrationCanvas()
+	})
+	canvas.addEventListener('mouseleave', () => {
+		drawingLine = null
+		redrawCalibrationCanvas()
+	})
+
+	calibration_undo.addEventListener('click', () => { userLines.pop(); redrawCalibrationCanvas() })
+	calibration_clear.addEventListener('click', () => { userLines = []; redrawCalibrationCanvas() })
+	calibration_show_auto.addEventListener('change', redrawCalibrationCanvas)
 }
 
 /** Renders one stage of the pipeline (1-7; stage 1 is the photo/line-detection view, see above) from the already computed snapshots */
@@ -338,7 +461,6 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	ST.new()
 
 	newRun()
-	// vein = veinXX
 
 	addDebugInfo()
 	setupSettingsMenu()
