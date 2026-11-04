@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Flying Machine Templates</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* layout: header with title+tabs, below it a 2-col split (3D viewport | side panel) that stacks to 1 col under 760px */
+:root{
+  --bg:#19140f; --panel:#231c15; --panel-2:#2c231a; --fg:#ece2d2; --muted:#ab9d87; --line:#3a2f24;
+  --accent:#d9632c; --accent-fg:#1a1008;
+  --piston-body:#9c7b4f; --piston-face:#5b5853; --sticky-tip:#7cb83f;
+  --slime:#8fce4f; --honey:#e8a93c; --observer:#3a3a3a; --observer-lens:#bfe8e8;
+  --lamp:#f4dfa0; --note:#6b4a2f; --obsidian:#1b1022;
+  --font-display:'IBM Plex Mono',ui-monospace,monospace;
+  --font-body:'IBM Plex Sans',system-ui,sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4ede1; --panel:#ffffff; --panel-2:#eee3d2; --fg:#2a2015; --muted:#7a6a53; --line:#ddcdb3;
+    --accent:#c44f1e; --accent-fg:#fff7ef;
+    --piston-body:#a88758; --piston-face:#6a665f; --sticky-tip:#5f9e2e;
+    --slime:#6fae34; --honey:#d99a2e; --observer:#4a4a4a; --observer-lens:#2b6f6f;
+    --lamp:#e0b94a; --note:#5a3d26; --obsidian:#120a18;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4ede1; --panel:#ffffff; --panel-2:#eee3d2; --fg:#2a2015; --muted:#7a6a53; --line:#ddcdb3;
+  --accent:#c44f1e; --accent-fg:#fff7ef;
+  --piston-body:#a88758; --piston-face:#6a665f; --sticky-tip:#5f9e2e;
+  --slime:#6fae34; --honey:#d99a2e; --observer:#4a4a4a; --observer-lens:#2b6f6f;
+  --lamp:#e0b94a; --note:#5a3d26; --obsidian:#120a18;
+  color-scheme: light;
+}
+:root[data-theme="dark"]{
+  --bg:#19140f; --panel:#231c15; --panel-2:#2c231a; --fg:#ece2d2; --muted:#ab9d87; --line:#3a2f24;
+  --accent:#d9632c; --accent-fg:#1a1008;
+  --piston-body:#9c7b4f; --piston-face:#5b5853; --sticky-tip:#7cb83f;
+  --slime:#8fce4f; --honey:#e8a93c; --observer:#3a3a3a; --observer-lens:#bfe8e8;
+  --lamp:#f4dfa0; --note:#6b4a2f; --obsidian:#1b1022;
+  color-scheme: dark;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--fg); font-family:var(--font-body);
+  padding-left:16px; padding-right:16px;
+}
+h1,h2,h3{font-family:var(--font-display); margin:0}
+.wrap{max-width:1180px; margin:0 auto; padding:20px 0 40px}
+
+header{display:flex; flex-direction:column; gap:14px; padding:4px 0 18px; border-bottom:1px solid var(--line)}
+.title-row{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+h1{font-size:clamp(20px,3.6vw,28px); font-weight:600; letter-spacing:0.01em}
+.eyebrow{font-family:var(--font-display); font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--accent)}
+.sub{font-size:14px; color:var(--muted); max-width:62ch; line-height:1.5}
+
+.tabs{display:flex; gap:8px; flex-wrap:wrap}
+.tab{
+  font-family:var(--font-display); font-size:12.5px; letter-spacing:0.02em; color:var(--muted);
+  background:var(--panel); border:1px solid var(--line); border-radius:7px; padding:8px 14px;
+  cursor:pointer; transition:border-color .15s, color .15s, background .15s;
+}
+.tab:hover{color:var(--fg); border-color:var(--accent)}
+.tab[aria-selected="true"]{color:var(--accent-fg); background:var(--accent); border-color:var(--accent)}
+
+main{display:grid; grid-template-columns:minmax(0,1.55fr) minmax(280px,0.9fr); gap:18px; margin-top:20px}
+@media (max-width:760px){ main{grid-template-columns:1fr} }
+
+.viewport-card{
+  background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden;
+  display:flex; flex-direction:column; min-width:0;
+}
+.viewport-head{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line)}
+.viewport-head h2{font-size:14px; font-weight:500; letter-spacing:0.01em}
+.hint{font-size:11.5px; color:var(--muted); font-family:var(--font-display)}
+#stage-wrap{position:relative; aspect-ratio:4/3; background:radial-gradient(ellipse at 50% 30%, var(--panel-2), var(--bg) 78%)}
+#stage{position:absolute; inset:0; display:block; width:100%; height:100%}
+
+.ctrl-row{display:flex; gap:8px; align-items:center; padding:12px 16px; border-top:1px solid var(--line); flex-wrap:wrap}
+button.action{
+  font-family:var(--font-display); font-size:12.5px; letter-spacing:0.02em; color:var(--accent-fg);
+  background:var(--accent); border:none; border-radius:7px; padding:9px 16px; cursor:pointer;
+}
+button.action:hover{filter:brightness(1.08)}
+button.action:disabled{opacity:.45; cursor:default}
+.state-label{font-family:var(--font-display); font-size:12px; color:var(--muted); margin-left:auto}
+.state-label b{color:var(--fg)}
+
+.panel{display:flex; flex-direction:column; gap:14px; min-width:0}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px}
+.card h3{font-size:12.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:12px; font-weight:500}
+
+.legend{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px}
+.legend li{display:flex; align-items:flex-start; gap:10px; font-size:13.5px; line-height:1.4}
+.swatch{width:16px; height:16px; border-radius:4px; flex:none; margin-top:2px; border:1px solid rgba(0,0,0,.25)}
+.legend .role{color:var(--muted); font-size:12px}
+
+.desc{font-size:13.5px; line-height:1.6; color:var(--fg)}
+.desc + .desc{margin-top:10px}
+.desc b{color:var(--accent)}
+
+.note{
+  background:var(--panel-2); border:1px solid var(--line); border-left:3px solid var(--accent);
+  border-radius:8px; padding:12px 14px; font-size:12.5px; line-height:1.55; color:var(--muted);
+}
+.note b{color:var(--fg)}
+.note a{color:var(--accent)}
+
+.foot{margin-top:28px; font-size:12px; color:var(--muted); font-family:var(--font-display); text-align:center}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="title-row">
+      <span class="eyebrow">Autominer &middot; ricerca componenti</span>
+    </div>
+    <h1>Template flying machine</h1>
+    <p class="sub">Due meccanismi per spingere e ritirare i blocchi di slime/honey del sistema di scavo: il pistone singolo (probabilmente sufficiente per il nostro caso) e la macchina del mod Geodesy, da cui è nato il progetto &mdash; qui ricostruita blocco per blocco dal suo codice sorgente. Ruota, zooma ed entra nella scena per ispezionarle da dentro.</p>
+    <div class="tabs" role="tablist" aria-label="Template">
+      <button class="tab" id="tab-single" role="tab" aria-selected="true">01 &middot; Pistone singolo</button>
+      <button class="tab" id="tab-engine" role="tab" aria-selected="false">02 &middot; Macchina Geodesy</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="viewport-card">
+      <div class="viewport-head">
+        <h2 id="stage-title">Pistone appiccicoso + catena slime</h2>
+        <span class="hint">trascina per ruotare &middot; rotella per zoom</span>
+      </div>
+      <div id="stage-wrap"><canvas id="stage"></canvas></div>
+      <div class="ctrl-row" id="ctrl-single">
+        <button class="action" id="btn-push">Spingi</button>
+        <button class="action" id="btn-pull">Ritira</button>
+        <span class="state-label">stato: <b id="state-single">a riposo</b></span>
+      </div>
+      <div class="ctrl-row" id="ctrl-engine" hidden>
+        <span class="hint">struttura lineare, 9 blocchi &times; 3 di larghezza &times; 1 di spessore &mdash; oscilla tra i due blocchi di ostruzione (obsidian) alle estremità</span>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="card" id="legend-card">
+        <h3>Legenda blocchi</h3>
+        <ul class="legend" id="legend-list"></ul>
+      </div>
+
+      <div class="card" id="desc-card">
+        <h3>Come funziona</h3>
+        <div id="desc-body"></div>
+      </div>
+
+      <div class="note" id="accuracy-note"></div>
+    </aside>
+  </main>
+
+  <p class="foot">ricostruzioni didattiche &middot; verifica sempre in gioco prima di fidartene per una build reale</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.139.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ---------- content ----------
+  var LEGEND = {
+    single: [
+      {color:'var(--piston-body)', border:'var(--sticky-tip)', name:'Pistone appiccicoso', role:'spinge E tira (vedi nota sotto)'},
+      {color:'var(--slime)', name:'Blocco di slime', role:'si attacca a slime/honey adiacenti, si muove con loro'}
+    ],
+    engine: [
+      {color:'var(--piston-body)', border:'var(--sticky-tip)', name:'Pistone appiccicoso', role:'spinge in una direzione, tira nell\'altra'},
+      {color:'var(--slime)', name:'Blocco di slime/honey', role:'collega i pistoni in catena'},
+      {color:'var(--observer)', name:'Observer', role:'rileva il movimento sulla faccia indicata, invia un impulso'},
+      {color:'var(--lamp)', name:'Redstone lamp', role:'indicatore visivo, non essenziale al meccanismo'},
+      {color:'var(--note)', name:'Note block', role:'segnale sonoro di stato, non essenziale al meccanismo'},
+      {color:'var(--obsidian)', name:'Obsidian', role:'ostruzione alle due estremità: la macchina ci sbatte contro e torna indietro'}
+    ]
+  };
+
+  var DESC = {
+    single: '<div class="desc">Un <b>pistone appiccicoso</b> spinge l\'intera catena di blocchi slime/honey collegati davanti a sé (fino a 12 blocchi).</div>' +
+      '<div class="desc">Al rilascio, <b>tira indietro l\'intera catena collegata</b> tramite slime/honey &mdash; non solo il blocco a contatto diretto. Fonte: wiki ufficiale, pagina Sticky Piston: "pulls the block attached to its head and any blocks attached to the head via slime- or honey blocks".</div>' +
+      '<div class="desc">Questo significa che per i nostri gruppi (&le;12 blocchi, già collegati) potrebbe bastare <b>un solo pistone appiccicoso</b> per gestire spinta e ritorno, senza una vera flying machine.</div>',
+    engine: '<div class="desc">La macchina usata dal mod <b>Geodesy</b> (da cui è nato questo progetto) per spingere ogni isola di slime/honey contro il geode. È una struttura <b>lineare</b> (9 blocchi di lunghezza &times; 3 di larghezza &times; 1 di spessore), non ad L &mdash; la forma a L richiesta dal solver riguarda l\'<b>isola</b> da spingere, non l\'ingranaggio che la spinge.</div>' +
+      '<div class="desc">Due coppie pistone+observer si attivano a vicenda in sequenza lungo la struttura, facendola "camminare" avanti e indietro tra i due blocchi di <b>obsidian</b> alle estremità, che fermano la macchina e la fanno tornare &mdash; è il sistema di ritorno di cui parlavamo.</div>' +
+      '<div class="desc">Redstone lamp e note block sono solo indicatori di stato (si accendono/suonano quando la macchina passa), non servono al meccanismo di base.</div>',
+  };
+
+  var NOTE = {
+    single: 'Meccanica verificata sulla documentazione ufficiale (minecraft.wiki/w/Sticky_Piston). Dimensioni e materiali qui sono semplificati per la dimostrazione.',
+    engine: 'Verificato riga per riga sul codice sorgente del mod: <a href="https://github.com/kosmolot-mods/geodesy/blob/main/src/main/java/pl/kosma/geodesy/GeodesyCore.java" target="_blank" rel="noopener">GeodesyCore.java, metodo buildMachine()</a>. Non una ricostruzione approssimativa.'
+  };
+
+  function renderLegend(which){
+    var ul = document.getElementById('legend-list');
+    ul.innerHTML = '';
+    LEGEND[which].forEach(function(item){
+      var li = document.createElement('li');
+      var sw = document.createElement('span');
+      sw.className = 'swatch';
+      sw.style.background = item.color;
+      if (item.border) sw.style.boxShadow = 'inset 0 0 0 2px ' + item.border;
+      var text = document.createElement('span');
+      text.innerHTML = '<div>' + item.name + '</div><div class="role">' + item.role + '</div>';
+      li.appendChild(sw); li.appendChild(text);
+      ul.appendChild(li);
+    });
+  }
+
+  // ---------- three.js scene ----------
+  var canvas = document.getElementById('stage');
+  var stageWrap = document.getElementById('stage-wrap');
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  var renderer = new THREE.WebGLRenderer({canvas:canvas, antialias:true, alpha:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+
+  var controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 1.5;
+  controls.maxDistance = 20;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  var key = new THREE.DirectionalLight(0xffffff, 0.9);
+  key.position.set(4, 6, 5);
+  scene.add(key);
+  var fill = new THREE.DirectionalLight(0xffffff, 0.35);
+  fill.position.set(-5, 2, -4);
+  scene.add(fill);
+
+  function cssVar(name){
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  var group = new THREE.Group();
+  scene.add(group);
+
+  var geo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+  var edgesGeo = new THREE.EdgesGeometry(geo);
+
+  function makeMaterial(colorVarName, opacity){
+    return new THREE.MeshStandardMaterial({
+      color: new THREE.Color(cssVar(colorVarName) || '#888888'),
+      roughness: 0.75, metalness: 0.05,
+      transparent: !!opacity, opacity: opacity || 1
+    });
+  }
+
+  function addBlock(x,y,z,colorVar,opacity){
+    var mat = makeMaterial(colorVar, opacity);
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x,y,z);
+    group.add(mesh);
+    var edges = new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:0.25}));
+    edges.position.copy(mesh.position);
+    group.add(edges);
+    return mesh;
+  }
+
+  // a small cone/arrow to show facing direction of pistons and observers
+  function addFacingArrow(x,y,z,dir,color){
+    var arrowLen = 0.55;
+    var arrow = new THREE.ArrowHelper(
+      new THREE.Vector3(dir[0],dir[1],dir[2]).normalize(),
+      new THREE.Vector3(x,y,z),
+      arrowLen, color, 0.22, 0.14
+    );
+    group.add(arrow);
+    return arrow;
+  }
+
+  function clearGroup(){
+    while(group.children.length) group.remove(group.children[0]);
+  }
+
+  function frameCamera(center, radius){
+    var dist = radius * 2.1;
+    camera.position.set(center.x + dist*0.72, center.y + dist*0.55, center.z + dist*0.72);
+    controls.target.copy(center);
+    controls.update();
+  }
+
+  // ---------- Template 1: single sticky piston + slime chain ----------
+  var singleState = { pushed:false, chainBlocks:[], pistonHead:null };
+  function buildSingleTemplate(){
+    clearGroup();
+    singleState.chainBlocks = [];
+
+    // sticky piston body at x=0, facing +x. head drawn as a slightly offset darker cap.
+    var body = addBlock(0,0,0,'--piston-body');
+    var tip = addBlock(0.5,0,0,'--sticky-tip', 0.9);
+    tip.scale.set(0.18,0.9,0.9);
+    addFacingArrow(0.55,0,0,[1,0,0], new THREE.Color(cssVar('--accent')||'#d9632c').getHex());
+
+    // 3-block slime chain resting right after the piston
+    for (var i=0;i<3;i++){
+      var b = addBlock(1+i,0,0,'--slime',0.88);
+      singleState.chainBlocks.push(b);
+    }
+    singleState.pushed = false;
+    frameCamera(new THREE.Vector3(1.5,0,0), 2.4);
+    updateSingleLabel();
+  }
+
+  function animatePush(){
+    if (singleState.pushed) return;
+    singleState.pushed = true;
+    singleState.chainBlocks.forEach(function(b, idx){
+      animateTo(b, b.position.x + 2, b.position.y, b.position.z, 450);
+    });
+    updateSingleLabel();
+  }
+  function animatePull(){
+    if (!singleState.pushed) return;
+    singleState.pushed = false;
+    singleState.chainBlocks.forEach(function(b){
+      animateTo(b, b.position.x - 2, b.position.y, b.position.z, 450);
+    });
+    updateSingleLabel();
+  }
+  function updateSingleLabel(){
+    document.getElementById('state-single').textContent = singleState.pushed ? 'esteso' : 'a riposo';
+    document.getElementById('btn-push').disabled = singleState.pushed;
+    document.getElementById('btn-pull').disabled = !singleState.pushed;
+  }
+
+  function animateTo(mesh, x, y, z, duration){
+    var start = {x:mesh.position.x, y:mesh.position.y, z:mesh.position.z};
+    var target = {x:x,y:y,z:z};
+    var t0 = performance.now();
+    function step(now){
+      var t = Math.min(1, (now - t0) / duration);
+      var e = t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; // ease in-out
+      mesh.position.set(
+        start.x + (target.x-start.x)*e,
+        start.y + (target.y-start.y)*e,
+        start.z + (target.z-start.z)*e
+      );
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // ---------- Template 2: Geodesy mod's actual flying machine ----------
+  // Transcribed directly from GeodesyCore.java's buildMachine() (world.setBlock calls, in
+  // source order). a = steps along the travel direction, u = steps along the 3-wide cross
+  // section. directionAlong -> +X here, directionUp -> +Y. z is always 0 (the whole machine
+  // is a single block deep). "along"/"-along" and "up"/"-up" match the source's Direction args.
+  var MACHINE_BLOCKS = [
+    {a:0, u:0, type:'obsidian'},                          // blockerPos (near wall)
+    {a:1, u:0, type:'piston', facing:'-along'},
+    {a:1, u:1, type:'slime'},
+    {a:1, u:2, type:'slime'},
+    {a:2, u:0, type:'lamp'},
+    {a:2, u:1, type:'observer', facing:'up'},
+    {a:2, u:2, type:'slime'},
+    {a:3, u:0, type:'observer', facing:'-along'},
+    {a:3, u:1, type:'slime'},
+    {a:3, u:2, type:'slime'},
+    {a:4, u:0, type:'piston', facing:'along'},
+    {a:4, u:1, type:'slime'},
+    {a:5, u:0, type:'slime'},
+    {a:5, u:1, type:'piston', facing:'-along'},
+    {a:6, u:0, type:'slime'},
+    {a:6, u:1, type:'observer', facing:'along'},           // final state: overwrites an earlier "up"-facing write at the same spot
+    {a:7, u:0, type:'slime'},
+    {a:7, u:1, type:'note'},
+    {a:8, u:0, type:'obsidian'}                             // far blocker
+  ];
+  var BLOCK_COLOR = {
+    piston: '--piston-body', slime: '--slime', observer: '--observer',
+    lamp: '--lamp', note: '--note', obsidian: '--obsidian'
+  };
+  var FACING_VEC = { along:[1,0,0], '-along':[-1,0,0], up:[0,1,0], '-up':[0,-1,0] };
+
+  function buildEngineTemplate(){
+    clearGroup();
+    MACHINE_BLOCKS.forEach(function(b){
+      var isPiston = b.type === 'piston';
+      var opacity = (b.type === 'slime') ? 0.88 : undefined;
+      var mesh = addBlock(b.a, b.u, 0, BLOCK_COLOR[b.type], opacity);
+      if (isPiston){
+        var tip = addBlock(b.a + FACING_VEC[b.facing][0]*0.5, b.u, 0, '--sticky-tip', 0.9);
+        tip.scale.set(
+          FACING_VEC[b.facing][0] ? 0.18 : 0.9,
+          FACING_VEC[b.facing][1] ? 0.18 : 0.9,
+          0.9
+        );
+      }
+      if (b.type === 'observer'){
+        addLensFace(b.a, b.u, 0, FACING_VEC[b.facing]);
+      }
+      if (b.facing){
+        var dir = FACING_VEC[b.facing];
+        var arrowColor = isPiston ? (cssVar('--accent')||'#d9632c') : (cssVar('--observer-lens')||'#bfe8e8');
+        addFacingArrow(b.a + dir[0]*0.55, b.u + dir[1]*0.55, dir[2]*0.55, dir, new THREE.Color(arrowColor).getHex());
+      }
+    });
+    frameCamera(new THREE.Vector3(4, 1, 0), 6.5);
+  }
+
+  function addLensFace(x,y,z,dir){
+    var lensGeo = new THREE.CircleGeometry(0.22, 16);
+    var lensMat = new THREE.MeshBasicMaterial({color:new THREE.Color(cssVar('--observer-lens')||'#bfe8e8')});
+    var lens = new THREE.Mesh(lensGeo, lensMat);
+    var offset = 0.49;
+    lens.position.set(x+dir[0]*offset, y+dir[1]*offset, z+dir[2]*offset);
+    lens.lookAt(x+dir[0]*2, y+dir[1]*2, z+dir[2]*2);
+    group.add(lens);
+  }
+
+  // ---------- tabs ----------
+  var tabSingle = document.getElementById('tab-single');
+  var tabEngine = document.getElementById('tab-engine');
+  var ctrlSingle = document.getElementById('ctrl-single');
+  var ctrlEngine = document.getElementById('ctrl-engine');
+  var stageTitle = document.getElementById('stage-title');
+  var descBody = document.getElementById('desc-body');
+  var accNote = document.getElementById('accuracy-note');
+
+  function selectTab(which){
+    var isSingle = which === 'single';
+    tabSingle.setAttribute('aria-selected', String(isSingle));
+    tabEngine.setAttribute('aria-selected', String(!isSingle));
+    ctrlSingle.hidden = !isSingle;
+    ctrlEngine.hidden = isSingle;
+    stageTitle.textContent = isSingle ? 'Pistone appiccicoso + catena slime' : 'Macchina del mod Geodesy (19 blocchi)';
+    descBody.innerHTML = isSingle ? DESC.single : DESC.engine;
+    accNote.innerHTML = '<b>Precisione:</b> ' + (isSingle ? NOTE.single : NOTE.engine);
+    renderLegend(which);
+    if (isSingle) buildSingleTemplate(); else buildEngineTemplate();
+  }
+  tabSingle.addEventListener('click', function(){ selectTab('single'); });
+  tabEngine.addEventListener('click', function(){ selectTab('engine'); });
+  document.getElementById('btn-push').addEventListener('click', animatePush);
+  document.getElementById('btn-pull').addEventListener('click', animatePull);
+
+  // ---------- resize + render loop ----------
+  function resize(){
+    var w = stageWrap.clientWidth, h = stageWrap.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  new ResizeObserver(resize).observe(stageWrap);
+
+  function animate(){
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  resize();
+  selectTab('single');
+  animate();
+})();
+</script>
+</body>
+</html>
