@@ -4,50 +4,80 @@ var d={}
 
 /** Holds the last computed vein + per-axis data, so renderStage() can redraw any stage without recomputing */
 let pipeline = null
-let currentStage = 6
+let currentStage = 1 // the app opens on stage 1 (photo calibration)
 
-/** Stage 1's source photo (see js/CalibrationTools.js) and its cached line-detection result, so switching away and back doesn't rerun Canny/Hough */
+/** Stage 1's source photo (see js/CalibrationTools.js) */
 let calibrationImage = new Image()
-let calibrationResult = null
 
-/**
- * Stage 1 manual calibration: automatic Hough detection (calibrationResult below) turned out too
- * noisy on a busy geode screenshot to find real vanishing points. Instead: the user draws 2 lines
- * by hand along real block edges they recognize (one vanishing direction), then 2 more along a
- * different direction (a second vanishing point) - 4 lines total. Each pair's vanishing point is
- * computed live as the intersection of its 2 lines (lineFromPoints/intersectLines, see
- * js/CalibrationTools.js). Once a line exists it can be fine-tuned by dragging its endpoints.
- * calibLines[i].x1 === null means that slot hasn't been drawn yet. Kept across stage switches so
- * retracing isn't needed every time stage 1 is revisited.
- */
-let calibLines = [
-	{ x1: null, y1: null, x2: null, y2: null, vp: 0 },
-	{ x1: null, y1: null, x2: null, y2: null, vp: 0 },
-	{ x1: null, y1: null, x2: null, y2: null, vp: 1 },
-	{ x1: null, y1: null, x2: null, y2: null, vp: 1 },
+let calibrationListenersBound = false // stage-1 panel listeners are wired once
+
+/** The synthetic test scenes (reference/synthetic/tools/synth_page.js), with known truth: the same seeds as the tests. Generated when first picked, not stored: inlining the images would add ~10 MB. */
+const SYNTH_SCENES = [
+	...[1, 2, 3, 5, 6, 7, 9, 10].map((seed) => ({ key: 'synth-far-' + seed, group: 'Sintetiche lontane', label: 'lontana, seed ' + seed, seed, opts: {} })),
+	...[1, 2, 3, 4, 5, 6, 7, 8].map((seed) => ({ key: 'synth-close-' + seed, group: 'Sintetiche ravvicinate', label: 'ravvicinata, seed ' + seed, seed, opts: { DR: [6, 10], RR: [3.5, 5] } })),
+	...[4, 11, 12, 13].map((seed) => ({ key: 'synth-dark-' + seed, group: 'Sintetiche scure', label: 'scura, seed ' + seed, seed, opts: { bright: 0.35 } })),
 ]
-const VP_COLORS = ['#3b82f6', '#a855f7']
-let draggingPoint = null // {line, end} (end: 1 or 2) while dragging an existing endpoint handle, null otherwise
-let drawingNewLine = null // {line, x1,y1,x2,y2} while drawing a not-yet-committed line into the next empty slot
-let calibrationListenersBound = false
+let synthLoadToken = 0
+let autoTruth = null // the true cubes and camera of the scene shown, when it is a synthetic one
 
-function resetCalibLines() {
-	for (let line of calibLines) { line.x1 = null; line.y1 = null; line.x2 = null; line.y2 = null }
+/** Adds the synthetic scenes to the photo menu (only if the generator is there) */
+function addSynthScenesToMenu() {
+	if (!window.makeSynth) return
+	let groups = new Map()
+	for (let s of SYNTH_SCENES) {
+		if (!groups.has(s.group)) { let g = document.createElement('optgroup'); g.label = s.group; calibration_photo.appendChild(g); groups.set(s.group, g) }
+		let o = document.createElement('option'); o.value = s.key; o.textContent = s.label
+		groups.get(s.group).appendChild(o)
+	}
 }
 
-/** The vanishing point for vpIndex (0 or 1): the intersection of its 2 calibLines, or null if either isn't drawn yet or they're too close to parallel */
-function computeVP(vpIndex, w, h) {
-	let [a, b] = calibLines.filter((l) => l.vp === vpIndex)
-	if (a.x1 === null || b.x1 === null) return null
-	let ga = lineFromPoints(a.x1, a.y1, a.x2, a.y2)
-	let gb = lineFromPoints(b.x1, b.y1, b.x2, b.y2)
-	if (!ga || !gb) return null
-	let p = intersectLines(ga, gb)
-	if (Math.abs(p.w) < 1e-6) return null
-	let diag = Math.hypot(w, h)
-	let x = p.x / p.w, y = p.y / p.w
-	if (Math.abs(x) > 30 * diag || Math.abs(y) > 30 * diag) return null // nearly parallel -> wild, meaningless point
-	return { x, y }
+/** Generates a scene into PHOTO_DATA, drawing every face with the project's texture */
+async function prepareSynthScene(scene) {
+	if (!window.__tex) {
+		let im = await new Promise((res) => { let i = new Image(); i.onload = () => res(i); i.src = TEXTURE_DATA.amethyst_block })
+		let c = document.createElement('canvas'); c.width = 16; c.height = 16
+		let g = c.getContext('2d'); g.drawImage(im, 0, 0)
+		window.__tex = g.getImageData(0, 0, 16, 16).data
+	}
+	let s = makeSynth(scene.seed, scene.opts)
+	PHOTO_DATA[scene.key] = s.url
+	scene.truth = s.truth
+}
+
+/** The cubes found against the true ones, as integer cells up to the best global translation (absolute depth is ambiguous with FOV) */
+function scoreAgainstTruth(A, T) {
+	let truth = new Set(T.cubes.map((g) => g.c.join(','))), best = 0
+	for (let dx = -14; dx <= 14; dx++) for (let dy = -14; dy <= 14; dy++) for (let dz = -14; dz <= 14; dz++) {
+		let n = 0
+		for (let c of A.cubes) if (truth.has((c.i + dx) + ',' + (c.j + dy) + ',' + (c.k + dz))) n++
+		if (n > best) best = n
+	}
+	return { recall: best / T.cubes.length, precision: best / Math.max(1, A.cubes.length), dFov: A.fov - T.fov, dPitch: A.pitch - T.pitch, dYaw: ((A.yaw - T.yaw + 45 + 900) % 90) - 45 }
+}
+
+/** Automatic calibration (see cameraFromLines/solveLattice in js/CalibrationTools.js): fitted camera + lattice cubes, computed once per photo (or on "Ricalcola") */
+let autoCal = null, autoCubes = null, autoCalState = 'idle' // idle | running | done
+let autoLive = null // latest progress report while running (phase, score...), shown in the stats panel
+/** Announces a step that has no progress callback of its own (the panel would keep showing the previous label while the step runs); waits for a repaint before the step starts */
+async function setPhase(phase, extra) {
+	autoLive = Object.assign({ phase }, extra)
+	redrawCalibrationCanvas()
+	await Promise.race([new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))), sleep(60)]) // one frame so the label is really painted; the timeout keeps a hidden tab (no frames) from stalling the run
+}
+let autoLines = null // {segs, w, h, shown}: straight edges of the purple outlines (mask-resolution coords), drawn one by one while running
+let autoMask = null // {canvas} purple mask of the current run, drawn as a tint
+let autoCalToken = 0 // bumped by each (re)run, so an older run still in flight cancels itself
+
+/** Switches stage 1 to another built-in photo: drops everything computed for the previous one (camera fit, lines, cubes) and cancels a run still in flight */
+function loadCalibrationPhoto(key) {
+	autoCalToken++ // an older automatic run still in flight cancels itself
+	autoCalState = 'idle'; autoCal = null; autoCubes = null; autoLive = null; autoMask = null; autoTruth = null
+	let want = ++synthLoadToken, scene = SYNTH_SCENES.find((s) => s.key === key)
+	if (scene && !PHOTO_DATA[key]) { prepareSynthScene(scene).then(() => { if (want === synthLoadToken) loadCalibrationPhoto(key) }); return }
+	if (scene) autoTruth = scene.truth
+	calibrationImage = new Image()
+	calibrationImage.onload = () => { if (currentStage === 1) renderCalibrationStage() }
+	calibrationImage.src = PHOTO_DATA[key]
 }
 
 /**
@@ -169,7 +199,7 @@ function exportVein() {
 
 /**
  * Stage 1: shows calibrationImage with its detected line segments (see js/CalibrationTools.js)
- * instead of the 3D scene. Runs detection once per image and caches it in calibrationResult.
+ * instead of the 3D scene, with the automatic camera fit + detected cubes overlaid (autoCal/autoCubes).
  */
 function renderCalibrationStage() {
 	ST.set3DVisible(false)
@@ -192,180 +222,235 @@ function renderCalibrationStage() {
 	setupCalibrationCanvas()
 	redrawCalibrationCanvas()
 
-	// automatic Hough detection (for the optional "mostra linee automatiche" overlay) runs in the
-	// background - manual line drawing works immediately and doesn't need to wait for it
-	if (calibrationResult === null) {
-		if (!cvReady) {
-			setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 500)
-			return
-		}
-		calibrationResult = { segments: detectLines(calibrationImage) }
+	// manual line drawing works immediately; the automatic fit needs OpenCV.js, which loads async
+	if (!cvReady) {
+		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 500)
+		return
+	}
+
+	if (autoCalState === 'idle') {
+		autoCalState = 'running'
 		redrawCalibrationCanvas()
+		setTimeout(runAutoCalibration, 50)
 	}
 }
 
-/** Converts a mouse event over calibration_canvas into image-pixel coordinates, accounting for the canvas being CSS-scaled down (max-width:100%) from its natural resolution */
-function imageCoordsFromEvent(event, canvas) {
-	let rect = canvas.getBoundingClientRect()
-	return {
-		x: (event.clientX - rect.left) * (canvas.width / rect.width),
-		y: (event.clientY - rect.top) * (canvas.height / rect.height),
+/** Live run: fit the camera, read the cubes from the lines, solve lattice and camera, pick the cells (see js/CalibrationTools.js). Every step redraws. */
+async function runAutoCalibration() {
+	let token = ++autoCalToken
+	let alive = () => token === autoCalToken
+	autoCal = null; autoCubes = null; autoLive = null; autoMask = null; autoLines = null
+	let fov = parseFloat(calibration_fov.value)
+	await setPhase('mask')
+	if (!alive()) return
+	let an = amethystAnalysis(calibrationImage, { maxW: 800, nPix: 1500 })
+	autoMask = maskToCanvas(an)
+	await setPhase('lines')
+	if (!alive()) return
+	let ex = extractMaskLines(calibrationImage, an) // rough position, from the purple mask...
+	await setPhase('refine')
+	if (!alive()) return
+	ex.segs = refineLinesRGB(calibrationImage, an, ex.segs) // ...exact position, from the original colour photo
+	// a mask line with no colour step under it is a chord across a concavity between touching cubes, not a real edge: drop it
+	ex.rejected = ex.rejected.concat(ex.segs.filter((s) => !s.refined))
+	ex.segs = ex.segs.filter((s) => s.refined)
+	autoLines = { segs: ex.segs, rejected: ex.rejected, w: an.w, h: an.h, shown: 0 }
+	redrawCalibrationCanvas()
+	for (let i = 0; i < autoLines.segs.length; i++) { // one line at a time; with "Rallenta" ticked each stays on screen for a moment
+		if (!alive()) return
+		autoLines.shown = i + 1
+		redrawCalibrationCanvas()
+		if (calibration_slow.checked) await sleep(250)
+		else if (i % 10 === 9) await tick()
+	}
+	await setPhase('camera')
+	if (!alive()) return
+	let fovFix = fov > 10 && fov < 170 ? fov : null, cal = null
+	let lc = autoLines.segs.length >= 6 ? cameraFromLines(autoLines.segs, an, { fovFix }) : null // the vertical vanishing point gives the pitch for each FOV: no grid over 3 numbers
+	if (lc) cal = { pitch: lc.pitch, yaw: lc.yaw, fov: lc.fov, fovFixed: !!fovFix, an }
+	else cal = await autoCalibrate(calibrationImage, { fovFix, onStep: (s) => { if (!alive()) return false; autoLive = Object.assign({}, s, { phase: 'camera' }); redrawCalibrationCanvas(); return true } }) // too few lines: the old fit on the mask edges
+	if (!alive()) return
+	autoCal = cal
+	if (cal && autoLines) { classifyLines(autoLines.segs, cal, 3); autoLines.shown = autoLines.segs.length }
+	if (!cal) { autoCalState = 'done'; redrawCalibrationCanvas(); return }
+	await setPhase('texture')
+	if (!alive()) return
+	// window.__noTex = true switches the texture off (tests)
+	let tex = window.__noTex ? null : await makeTextureContext(calibrationImage)
+	if (!alive()) return
+	let segs = autoLines ? autoLines.segs : [], lab = labelBlobs(cal.an)
+	if (tex) { // the texture of THIS photo, learned from the cubes read directly, used ONLY if verified on this photo (a template that does not match would reject the right cells)
+		let first = cubePoses(cal, calibrationImage, cal.an, segs, lab).map((q) => ({ P: q.P, nref: Math.max(q.nLines, 3), z: q.z }))
+		if (first.length) learnTexture(tex, cal, first)
+		let q = first.length ? templateQuality(tex, cal, first) : null
+		if (q === null || q < 0.5) tex = null
+		else tex.quality = q
+	}
+	await setPhase('lattice')
+	if (!alive()) return
+	let lattice = solveLattice(cal, calibrationImage, cal.an, segs, lab, { fovFixed: cal.fovFixed })
+	if (!lattice) { autoCubes = null; autoLive = null; autoCalState = 'done'; redrawCalibrationCanvas(); return } // fewer than 2 cubes readable: nothing to anchor the lattice on
+	await setPhase('cells')
+	if (!alive()) return
+	let result
+	try {
+		result = await finishLattice(lattice, cal.an, tex, lattice.allSegs, {
+			fovFixed: cal.fovFixed,
+			onStep: (s) => { if (!alive()) return false; autoCubes = s; autoLive = s; redrawCalibrationCanvas(); return true },
+		})
+	} catch (e) {
+		if (e === AUTOCAL_CANCELLED) return
+		throw e
+	}
+	if (!alive()) return
+	if (!tex && !window.__noTex) { // too few sure cubes to learn the texture at the start: learn it from the cells found (the wrong ones disagree with the others) and use it to filter them
+		let late = await makeTextureContext(calibrationImage), geo = Object.assign({}, cal, { pitch: result.pitch, yaw: result.yaw, fov: result.fov }), ps = result.cubesRay.map((c) => ({ P: c.P, nref: 9, z: c.P[2] }))
+		if (late && ps.length) {
+			learnTexture(late, geo, ps)
+			let q = templateQuality(late, geo, ps)
+			if (q !== null && q >= 0.5) { late.quality = q; result = chooseCells(result, cal.an, late) }
+		}
+		if (!alive()) return
+	}
+	result.cubes = result.cubesRay
+	result.score = result.cubesRay.score
+	if (autoTruth) result.truthScore = scoreAgainstTruth(result, autoTruth)
+	autoCubes = result; autoLive = null
+	autoCalState = 'done'
+	redrawCalibrationCanvas()
+}
+
+/** Purple mask -> canvas (translucent purple where the mask is set), for the overlay tint */
+function maskToCanvas(an) {
+	let c = document.createElement('canvas')
+	c.width = an.w; c.height = an.h
+	let ctx = c.getContext('2d'), img = ctx.createImageData(an.w, an.h)
+	for (let i = 0; i < an.w * an.h; i++) if (an.data[i]) { img.data[i * 4] = 255; img.data[i * 4 + 1] = 0; img.data[i * 4 + 2] = 255; img.data[i * 4 + 3] = 110 }
+	ctx.putImageData(img, 0, 0)
+	return c
+}
+
+/** Draws a 3D segment (camera-space endpoints A, B), clipped to the near plane, as a 2D line */
+function drawSeg3D(ctx, A, B, f, cx, cy) {
+	const NEAR = 0.3
+	if (A[2] < NEAR && B[2] < NEAR) return
+	if (A[2] < NEAR) { let t = (NEAR - A[2]) / (B[2] - A[2]); A = A.map((v, i) => v + t * (B[i] - v)) }
+	else if (B[2] < NEAR) { let t = (NEAR - B[2]) / (A[2] - B[2]); B = B.map((v, i) => v + t * (A[i] - v)) }
+	let a = projectCam(A, f, cx, cy), b = projectCam(B, f, cx, cy)
+	ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+}
+
+/** Overlays the 3D lattice (floor grid under the detected cubes) and the detected cubes as wireframes, both from the automatic camera fit */
+function drawAutoOverlay(ctx, canvas) {
+	if (autoMask && (autoCalState === 'running' || calibration_show_mask.checked)) ctx.drawImage(autoMask, 0, 0, canvas.width, canvas.height)
+	if (autoLines && (autoCalState === 'running' || calibration_show_lines.checked)) {
+		let sx = canvas.width / autoLines.w, sy = canvas.height / autoLines.h, AXIS_COL = ['#ff5050', '#50ff50', '#5aa0ff']
+		ctx.lineWidth = 3
+		for (let i = 0; i < autoLines.shown; i++) {
+			let L = autoLines.segs[i]
+			ctx.strokeStyle = L.axis === undefined ? '#ffffff' : L.axis < 0 ? 'rgba(160,160,160,0.8)' : AXIS_COL[L.axis]
+			ctx.beginPath(); ctx.moveTo(L.x1 * sx, L.y1 * sy); ctx.lineTo(L.x2 * sx, L.y2 * sy); ctx.stroke()
+		}
+	}
+	if (!autoCubes || !autoCubes.cubes.length) return
+	let f = (canvas.height / 2) / Math.tan(autoCubes.fov * Math.PI / 360), cx = canvas.width / 2, cy = canvas.height / 2
+	let ax = autoCubes.ax, O = autoCubes.origin
+	let at = (a, b, c) => [O[0] + a * ax.ex[0] + b * ax.ey[0] + c * ax.ez[0], O[1] + a * ax.ex[1] + b * ax.ey[1] + c * ax.ez[1], O[2] + a * ax.ex[2] + b * ax.ey[2] + c * ax.ez[2]]
+	let cubes = autoCubes.cubes
+	let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+	for (let c of cubes) { let v = [c.i, c.j, c.k]; for (let n = 0; n < 3; n++) { lo[n] = Math.min(lo[n], v[n]); hi[n] = Math.max(hi[n], v[n]) } }
+
+	if (calibration_show_diff.checked && autoCal && autoCal.an) {
+		// where the union of the detected cubes disagrees with the purple mask (mask resolution, drawn scaled up): red = covered but not purple, blue = purple but not covered
+		let an = autoCal.an, fm = (an.h / 2) / Math.tan(autoCubes.fov * Math.PI / 360), cov = new Uint8Array(an.w * an.h)
+		for (let c of cubes) {
+			let hl = cubeHull(at(c.i, c.j, c.k), ax, fm, an.w / 2, an.h / 2)
+			if (hl) forEachPixelInHull(hl, an.w, an.h, (x, y) => { cov[y * an.w + x] = 1 })
+		}
+		let dc = document.createElement('canvas'); dc.width = an.w; dc.height = an.h
+		let dctx = dc.getContext('2d'), di = dctx.createImageData(an.w, an.h)
+		for (let i = 0; i < an.w * an.h; i++) {
+			if (an.data[i] && !cov[i]) { di.data[i * 4] = 0; di.data[i * 4 + 1] = 140; di.data[i * 4 + 2] = 255; di.data[i * 4 + 3] = 200 }
+			else if (cov[i] && !an.data[i]) { di.data[i * 4] = 255; di.data[i * 4 + 1] = 30; di.data[i * 4 + 2] = 30; di.data[i * 4 + 3] = 200 }
+		}
+		dctx.putImageData(di, 0, 0)
+		ctx.imageSmoothingEnabled = false
+		ctx.drawImage(dc, 0, 0, canvas.width, canvas.height)
+		ctx.imageSmoothingEnabled = true
+	}
+
+	if (calibration_show_grid.checked) {
+		ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.45)'
+		let y = lo[1] - 0.5
+		for (let i = lo[0] - 0.5; i <= hi[0] + 0.51; i++) drawSeg3D(ctx, at(i, y, lo[2] - 0.5), at(i, y, hi[2] + 0.5), f, cx, cy)
+		for (let k = lo[2] - 0.5; k <= hi[2] + 0.51; k++) drawSeg3D(ctx, at(lo[0] - 0.5, y, k), at(hi[0] + 0.5, y, k), f, cx, cy)
+	}
+	if (calibration_show_cubes.checked) {
+		const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]]
+		ctx.lineWidth = 2
+		for (let c of cubes) {
+			let t = hi[1] > lo[1] ? (c.j - lo[1]) / (hi[1] - lo[1]) : 0 // colour by height: low = yellow, high = orange/red
+			ctx.strokeStyle = 'hsl(' + Math.round(55 - 55 * t) + ',100%,55%)'
+			let C = cubeCorners(at(c.i, c.j, c.k), ax)
+			let far = 0
+			for (let q = 1; q < 8; q++) if (C[q][2] > C[far][2]) far = q // the corner farthest from the camera is hidden, and so are the 3 edges meeting there
+			for (let [a, b] of EDGES) if (a !== far && b !== far) drawSeg3D(ctx, C[a], C[b], f, cx, cy)
+		}
+		if (calibration_show_labels.checked) {
+			ctx.font = '12px sans-serif'; ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3
+			for (let c of cubes) {
+				let p = projectCam(at(c.i, c.j, c.k), f, cx, cy), txt = c.i + ',' + c.j + ',' + c.k
+				ctx.strokeText(txt, p.x - 14, p.y + 4); ctx.fillText(txt, p.x - 14, p.y + 4)
+			}
+		}
 	}
 }
 
-/** Redraws the photo + (optionally) the automatic Hough lines + each drawn line (extended + its draggable segment/endpoints) + any line mid-draw + the computed vanishing points, and refreshes the stats panel */
+/** Redraws the photo + the automatic overlay and refreshes the stats panel */
 function redrawCalibrationCanvas() {
 	let canvas = calibration_canvas
 	let ctx = canvas.getContext('2d')
 	ctx.clearRect(0, 0, canvas.width, canvas.height)
 	ctx.drawImage(calibrationImage, 0, 0)
+	drawAutoOverlay(ctx, canvas)
 
-	if (calibration_show_auto.checked && calibrationResult) {
-		ctx.lineWidth = 1
-		ctx.strokeStyle = 'rgba(255,255,255,0.3)'
-		for (let s of calibrationResult.segments) {
-			ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke()
-		}
-	}
-
-	let drawnLines = calibLines.filter((l) => l.x1 !== null)
-
-	// each line extended well past its own endpoints, thin+faint - so where it's headed (and
-	// whether it agrees with the other block edges beyond the segment itself) is visible at a glance
-	const EXT = Math.max(canvas.width, canvas.height) * 2
-	drawnLines.forEach((line) => {
-		let dx = line.x2 - line.x1, dy = line.y2 - line.y1
-		let len = Math.hypot(dx, dy) || 1
-		let ux = dx / len, uy = dy / len
-		ctx.strokeStyle = VP_COLORS[line.vp]
-		ctx.globalAlpha = 0.35
-		ctx.lineWidth = 1
-		ctx.beginPath()
-		ctx.moveTo(line.x1 - ux * EXT, line.y1 - uy * EXT)
-		ctx.lineTo(line.x2 + ux * EXT, line.y2 + uy * EXT)
-		ctx.stroke()
-		ctx.globalAlpha = 1
-	})
-
-	// the actual draggable segment + its 2 endpoint handles, on top and fully opaque
-	drawnLines.forEach((line) => {
-		ctx.strokeStyle = VP_COLORS[line.vp]
-		ctx.lineWidth = 3
-		ctx.beginPath(); ctx.moveTo(line.x1, line.y1); ctx.lineTo(line.x2, line.y2); ctx.stroke()
-		for (let [hx, hy] of [[line.x1, line.y1], [line.x2, line.y2]]) {
-			ctx.fillStyle = VP_COLORS[line.vp]
-			ctx.beginPath(); ctx.arc(hx, hy, 7, 0, 2 * Math.PI); ctx.fill()
-			ctx.strokeStyle = 'black'; ctx.lineWidth = 1.5; ctx.stroke()
-		}
-	})
-
-	// the line currently being drawn from scratch (not committed yet)
-	if (drawingNewLine) {
-		ctx.strokeStyle = VP_COLORS[drawingNewLine.vp]
-		ctx.lineWidth = 3
-		ctx.setLineDash([8, 6])
-		ctx.beginPath(); ctx.moveTo(drawingNewLine.x1, drawingNewLine.y1); ctx.lineTo(drawingNewLine.x2, drawingNewLine.y2); ctx.stroke()
-		ctx.setLineDash([])
-	}
-
-	let vps = [computeVP(0, canvas.width, canvas.height), computeVP(1, canvas.width, canvas.height)]
-	vps.forEach((vp, i) => {
-		if (!vp) return
-		let x = Math.max(10, Math.min(canvas.width - 10, vp.x))
-		let y = Math.max(10, Math.min(canvas.height - 10, vp.y))
-		ctx.fillStyle = VP_COLORS[i]
-		ctx.beginPath(); ctx.arc(x, y, 9, 0, 2 * Math.PI); ctx.fill()
-		ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke()
-	})
-
-	updateCalibrationStats(vps, canvas.width, canvas.height)
+	updateCalibrationStats()
 }
 
-function updateCalibrationStats(vps, w, h) {
-	let drawnCount = calibLines.filter((l) => l.x1 !== null).length
-	let html
-	if (drawnCount < 2) html = 'Disegna 2 linee lungo spigoli paralleli (1&deg; direzione, blu).'
-	else if (drawnCount < 4) html = 'Ora 2 linee lungo un\'altra direzione (2&deg; direzione, viola).'
-	else html = 'Trascina gli estremi per aggiustare le linee.'
-
-	if (drawnCount >= 2 && !vps[0]) html += '<br><span style="color:#f87171">le 2 linee blu sono troppo parallele</span>'
-	if (drawnCount >= 4 && !vps[1]) html += '<br><span style="color:#f87171">le 2 linee viola sono troppo parallele</span>'
-	if (vps[0] && vps[1]) {
-		let f = calibrateFromPair(vps[0], vps[1], w / 2, h / 2)
-		if (f !== null) {
-			let vFOV = 2 * Math.atan((h / 2) / f) * 180 / Math.PI
-			html += '<br><b style="color:#4ade80">f=' + f.toFixed(0) + 'px, FOV vert ' + vFOV.toFixed(1) + '&deg;</b>'
-		} else {
-			html += '<br><span style="color:#f87171">posizione non valida</span>'
-		}
+function updateCalibrationStats() {
+	let html = ''
+	// the steps in the order they run
+	const PHASES = { mask: 'maschera viola', lines: 'linee dai contorni della maschera', refine: 'rifinitura delle linee sul colore', camera: 'stima camera dalle linee', texture: 'texture della foto dai cubi sicuri', lattice: 'cubi e reticolo dalle linee', cells: 'scelta delle celle' }
+	const ORDER = ['mask', 'lines', 'refine', 'camera', 'texture', 'lattice', 'cells']
+	let cam = autoLive && autoLive.pitch !== undefined ? autoLive : autoCal
+	if (autoCalState === 'running' && autoLive) {
+		let n = ORDER.indexOf(autoLive.phase)
+		html += '<br><br><b style="color:#facc15">In corso: ' + (n >= 0 ? (n + 1) + '/' + ORDER.length + ' ' : '') + (PHASES[autoLive.phase] || autoLive.phase) + '</b>'
 	}
+	if (cam) html += '<br>' + (autoCalState === 'running' ? '' : '<br>') + '<b style="color:#facc15">Auto:</b> pitch ' + cam.pitch.toFixed(1) + '&deg; gi&ugrave;, yaw ' + cam.yaw.toFixed(1) + '&deg;, FOV vert ' + cam.fov.toFixed(1) + '&deg;'
+	if (autoLines) {
+		let n = autoLines.segs.length, ok = autoLines.segs.filter((L) => L.axis >= 0), tot = autoLines.segs.reduce((a, L) => a + L.len, 0)
+		html += '<br>Linee dai contorni: <b>' + n + '</b>' + (autoLines.segs[0] && autoLines.segs[0].axis !== undefined ? ', ' + ok.length + ' compatibili con la camera stimata (' + (100 * ok.reduce((a, L) => a + L.len, 0) / Math.max(1, tot)).toFixed(0) + '% della lunghezza; rosso/verde/blu = asse X/Y/Z, grigio = nessuno)' : '')
+	}
+	if (autoTruth) html += '<br><br><b style="color:#60a5fa">Scena sintetica</b>: ' + autoTruth.cubes.length + ' cubi veri, pitch ' + autoTruth.pitch.toFixed(1) + '&deg;, yaw ' + autoTruth.yaw.toFixed(1) + '&deg;, FOV ' + autoTruth.fov.toFixed(1) + '&deg;'
+	if (autoCubes && autoCubes.truthScore) {
+		let t = autoCubes.truthScore, good = t.recall >= 0.95 && t.precision >= 0.95
+		html += '<br><b style="color:' + (good ? '#4ade80' : '#f87171') + '">Trovati ' + Math.round(t.recall * 100) + '% dei cubi veri, giusti ' + Math.round(t.precision * 100) + '% dei trovati</b><br>Errore camera: FOV ' + t.dFov.toFixed(2) + '&deg;, pitch ' + t.dPitch.toFixed(2) + '&deg;, yaw ' + t.dYaw.toFixed(2) + '&deg;'
+	}
+	if (autoCubes) {
+		html += '<br><b>' + autoCubes.cubes.length + ' cubi</b> agganciati al reticolo' + (autoCubes.score !== undefined ? ' (punteggio ' + Math.round(autoCubes.score) + ')' : '') + (autoCubes.refIoU ? ', cubo di riferimento IoU ' + autoCubes.refIoU.toFixed(2) : '') + ' - coord. relative al riferimento (0,0,0)'
+	} else if (autoCalState === 'done') html += '<br><span style="color:#f87171">meno di 2 cubi leggibili dalle righe: niente a cui agganciare il reticolo (o troppo poco viola)</span>'
 	calibration_stats.innerHTML = html
 }
 
-/** How close (in image px) the mouse must be to an endpoint handle to grab it instead of starting a new line */
-const HANDLE_GRAB_RADIUS = 20
-
-/** Wires up drawing the 4 lines from scratch, dragging their endpoints afterwards, + the reset/show-auto controls, once */
+/** Wires up the stage-1 panel controls (photo select, recompute, overlay checkboxes) once */
 function setupCalibrationCanvas() {
 	if (calibrationListenersBound) return
 	calibrationListenersBound = true
 	let canvas = calibration_canvas
-
-	function existingHandles() {
-		let pts = []
-		for (let line of calibLines) {
-			if (line.x1 === null) continue
-			pts.push({ line, end: 1, x: line.x1, y: line.y1 })
-			pts.push({ line, end: 2, x: line.x2, y: line.y2 })
-		}
-		return pts
-	}
-
-	canvas.addEventListener('mousedown', (e) => {
-		let p = imageCoordsFromEvent(e, canvas)
-		let scale = canvas.width / canvas.getBoundingClientRect().width
-		let closest = null, closestDist = Infinity
-		for (let h of existingHandles()) {
-			let dist = Math.hypot(h.x - p.x, h.y - p.y)
-			if (dist < closestDist) { closestDist = dist; closest = h }
-		}
-		if (closest && closestDist <= HANDLE_GRAB_RADIUS * scale) {
-			draggingPoint = closest
-			return
-		}
-		// no existing handle nearby - start a brand new line in the next empty slot, if any
-		let emptySlot = calibLines.findIndex((l) => l.x1 === null)
-		if (emptySlot === -1) return
-		drawingNewLine = { slot: emptySlot, vp: calibLines[emptySlot].vp, x1: p.x, y1: p.y, x2: p.x, y2: p.y }
-	})
-	canvas.addEventListener('mousemove', (e) => {
-		let p = imageCoordsFromEvent(e, canvas)
-		if (draggingPoint) {
-			if (draggingPoint.end === 1) { draggingPoint.line.x1 = p.x; draggingPoint.line.y1 = p.y }
-			else { draggingPoint.line.x2 = p.x; draggingPoint.line.y2 = p.y }
-			redrawCalibrationCanvas()
-		} else if (drawingNewLine) {
-			drawingNewLine.x2 = p.x; drawingNewLine.y2 = p.y
-			redrawCalibrationCanvas()
-		}
-	})
-	canvas.addEventListener('mouseup', () => {
-		draggingPoint = null
-		if (drawingNewLine) {
-			let length = Math.hypot(drawingNewLine.x2 - drawingNewLine.x1, drawingNewLine.y2 - drawingNewLine.y1)
-			if (length > 10) { // ignore accidental clicks
-				let line = calibLines[drawingNewLine.slot]
-				line.x1 = drawingNewLine.x1; line.y1 = drawingNewLine.y1
-				line.x2 = drawingNewLine.x2; line.y2 = drawingNewLine.y2
-			}
-			drawingNewLine = null
-			redrawCalibrationCanvas()
-		}
-	})
-	canvas.addEventListener('mouseleave', () => { draggingPoint = null; drawingNewLine = null; redrawCalibrationCanvas() })
-
-	calibration_reset.addEventListener('click', () => { resetCalibLines(); redrawCalibrationCanvas() })
-	calibration_show_auto.addEventListener('change', redrawCalibrationCanvas)
+	for (let el of [calibration_show_grid, calibration_show_cubes, calibration_show_labels, calibration_show_mask, calibration_show_diff, calibration_show_lines]) el.addEventListener('change', redrawCalibrationCanvas)
+	calibration_photo.addEventListener('change', () => { loadCalibrationPhoto(calibration_photo.value) })
+	calibration_recompute.addEventListener('click', () => { autoCalState = 'idle'; renderCalibrationStage() })
 }
 
 /** Renders one stage of the pipeline (1-7; stage 1 is the photo/line-detection view, see above) from the already computed snapshots */
@@ -543,7 +628,9 @@ window.addEventListener(`DOMContentLoaded`, () => {
 	setupSettingsMenu()
 
 	ST.setUpCameras()
-	calibrationImage.src = PHOTO_DATA.geode01
+	addSynthScenesToMenu()
+	calibration_photo.value = 'geode01' // the browser restores the old selection on refresh, while the photo shown is always geode-01
+	loadCalibrationPhoto('geode01')
 	renderStage(currentStage)
 	ST.animate()
 });

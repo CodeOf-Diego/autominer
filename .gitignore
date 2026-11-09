@@ -1,0 +1,4 @@
+# test photos and synthetic scenes (PNG + truth JSON): kept on disk, not in the repo
+reference/screenshots/*.png
+reference/synthetic/*.png
+reference/synthetic/*.json

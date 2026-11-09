@@ -23,6 +23,7 @@
 	<script src="js/SceneTools.js" defer></script>
 	<script src="js/PhotoData.js" defer></script>
 	<script src="js/CalibrationTools.js" defer></script>
+	<script src="reference/synthetic/tools/synth_page.js" defer></script>
 	<script src="main.js" defer></script>
 	<!-- stage 1 (photo + detected lines): downloads lazily in the background, a few MB -->
 	<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
@@ -34,13 +35,21 @@
     <!-- stage 1 only: photo + detected lines, in place of the 3D scene -->
     <div id="calibration_view" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:5; background:black; overflow:auto;">
       <div style="display:flex; align-items:flex-start; gap:10px;">
-      <canvas id="calibration_canvas" style="max-width:calc(100% - 320px); display:block; cursor:crosshair;"></canvas>
+      <canvas id="calibration_canvas" style="max-width:calc(100% - 320px); display:block;"></canvas>
       <div id="calibration_panel" style="flex:0 0 300px; box-sizing:border-box; margin-top:10px; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:12px; padding:10px; border-radius:6px;">
-        <div style="font-weight:bold; margin-bottom:6px;">Punti di fuga</div>
-        <div>Disegna 2 linee lungo 2 spigoli reali paralleli (stessa direzione) che riconosci nella foto: diventano il primo colore. Poi altre 2 lungo un'altra direzione per il secondo colore. Una volta tracciate puoi trascinarne gli estremi per aggiustarle - il punto di fuga di ogni colore è dove le sue 2 linee si incrociano, calcolato in automatico.</div>
+        <label style="display:block; margin-bottom:8px; font-weight:bold;">Foto: <select id="calibration_photo" autocomplete="off"><option value="geode01">geode-01</option><option value="geode02">geode-02</option><option value="geode03">geode-03</option></select></label>
         <div id="calibration_stats" style="margin-top:8px;"></div>
-        <button id="calibration_reset" style="margin-top:8px; width:100%;">Reset punti</button>
-        <label style="display:block; margin-top:8px;"><input type="checkbox" id="calibration_show_auto"> Mostra linee automatiche</label>
+        <div style="margin-top:12px; padding-top:8px; border-top:1px solid #555; font-weight:bold;">Calibrazione automatica</div>
+        <div>Camera (pitch/yaw/FOV) stimata dai bordi dei blocchi di ametista, senza input manuale; poi i cubi sono agganciati a un reticolo 3D.</div>
+        <label style="display:block; margin-top:6px;"><input type="checkbox" id="calibration_show_grid" checked> Griglia 3D (piano sotto i cubi)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_cubes" checked> Cubi rilevati</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_lines" checked> Linee dai contorni (colore = asse)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_labels"> Coordinate dei cubi</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_diff"> Differenze cubi/maschera (rosso = coperto non viola, blu = viola non coperto)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_mask"> Maschera viola (sempre visibile mentre calcola)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_slow"> Rallenta (passo per passo)</label>
+        <label style="display:block; margin-top:6px;">FOV verticale noto (vuoto = auto): <input type="number" id="calibration_fov" min="20" max="160" style="width:60px;"></label>
+        <button id="calibration_recompute" style="margin-top:6px; width:100%;">Ricalcola auto</button>
       </div>
       </div>
     </div>
