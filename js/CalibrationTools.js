@@ -33,6 +33,38 @@ function onOpenCvReady(resolved) {
 
 /** Amethyst colour range in OpenCV HSV (H 0-180): shared by the camera-fit mask and the line extractor */
 const PURPLE_LO = [115, 70, 20, 0], PURPLE_HI = [160, 255, 255, 255] // V >= 20, not 70: in survival / dim caves the amethyst is dark but keeps its hue and saturation (rock stays low-saturation)
+/**
+ * Where the amethyst hue actually is in this photo: peak of the hue histogram of the saturated pixels in 115-175 (smoothed +-5).
+ * Normally 132-135; a warm or tinted screenshot moves it (geode-05: 157, the amethyst spread over 140-179 and the fixed
+ * window 115-160 cut it to ragged pieces). Returns the shift from 134, 0 within +-5 so ordinary photos are untouched.
+ */
+function amethystHueShift(hsv) {
+    let d = hsv.data, n = hsv.rows * hsv.cols, hist = new Float64Array(180)
+    for (let q = 0; q < n; q++) if (d[q * 3 + 1] >= 70 && d[q * 3 + 2] >= 20) hist[d[q * 3]]++
+    let best = -1, peak = 134
+    for (let x = 115; x <= 175; x++) { let s = 0; for (let t = -5; t <= 5; t++) s += hist[(x + t) % 180]; if (s > best) { best = s; peak = x } }
+    let s = peak - 134
+    return Math.abs(s) <= 5 ? 0 : Math.max(-15, Math.min(25, s))
+}
+/**
+ * The purple windows widened toward the photo's amethyst hue (only on that side: the other bound stays, see amethystHueShift).
+ * The upper hue bound may pass 179: hue is a circle, and in a warm photo the pale pink texels of the amethyst go past magenta to 0-8.
+ */
+function purpleWindows(shift) {
+    let s = shift || 0, dn = Math.min(0, s), up = Math.max(0, s)
+    return { lo: [115 + dn, 70, 20, 0], hi: [160 + up, 255, 255, 255], looseLo: [125 + dn, 25, 18, 0], looseHi: [175 + up, 255, 255, 255] }
+}
+/** cv.inRange on HSV with a hue window that may wrap past 179 (lo/hi as from purpleWindows) */
+function purpleInRange(hsv, lo, hi, dst) {
+    let h = hsv.rows, w = hsv.cols, a = new cv.Mat(h, w, hsv.type(), lo), b = new cv.Mat(h, w, hsv.type(), [Math.min(179, hi[0]), hi[1], hi[2], hi[3]])
+    cv.inRange(hsv, a, b, dst)
+    if (hi[0] > 179) {
+        let c = new cv.Mat(h, w, hsv.type(), [0, lo[1], lo[2], lo[3]]), d = new cv.Mat(h, w, hsv.type(), [hi[0] - 180, hi[1], hi[2], hi[3]]), m = new cv.Mat()
+        cv.inRange(hsv, c, d, m); cv.bitwise_or(dst, m, dst)
+        for (let x of [c, d, m]) x.delete()
+    }
+    a.delete(); b.delete()
+}
 
 /** World axes (X, Y=up, Z) expressed in camera coords (x right, y down, z forward) for a camera pitched `pitch` deg down and yawed `yaw` deg about the vertical */
 function cameraAxes(pitchDeg, yawDeg) {
@@ -42,33 +74,70 @@ function cameraAxes(pitchDeg, yawDeg) {
     return { ex: [r[0], dn[0], fw[0]], ey: [r[1], dn[1], fw[1]], ez: [r[2], dn[2], fw[2]] }
 }
 
+/** The photo at w x h as an OpenCV HSV Mat (the caller deletes it) */
+function photoHSV(img, w, h) {
+    let src = cv.imread(photoCanvas(img, w, h)), rgb = new cv.Mat(), hsv = new cv.Mat()
+    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB); cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV)
+    src.delete(); rgb.delete()
+    return hsv
+}
+/** Strict purple mask of an HSV photo (window from purpleWindows), 3x3 close + open against specks and pinholes. Returns {raw, filled} Mats (filled = holes inside each blob filled: the pale pink highlights of a close cube fail the saturation threshold); the caller deletes them */
+function purpleMask(hsv, win) {
+    let raw = new cv.Mat(), k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3))
+    purpleInRange(hsv, win.lo, win.hi, raw)
+    cv.morphologyEx(raw, raw, cv.MORPH_CLOSE, k); cv.morphologyEx(raw, raw, cv.MORPH_OPEN, k)
+    let filled = raw.clone(), c = new cv.MatVector(), hier = new cv.Mat()
+    cv.findContours(raw, c, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    for (let i = 0; i < c.size(); i++) cv.drawContours(filled, c, i, new cv.Scalar(255), -1)
+    for (let m of [k, c, hier]) m.delete()
+    return { raw, filled }
+}
+
 /** Purple (amethyst) mask at <= maxW px wide, plus a random sample of its boundary pixels with local tangent direction */
+/**
+ * The photo's pixels at w x h, as a canvas, identical in every browser. Each browser shrinks an image in drawImage with its own filter
+ * (and Firefox on the GPU with yet another): the purple mask of the same photo came out 3 pixels different, and on a fragile photo that
+ * was enough to give 37 wrong cubes instead of 28 right ones. So the photo is read once at its own size (that read is exact everywhere)
+ * and shrunk here, each target pixel being the plain average of the source pixels under it.
+ */
+let PHOTO_PIXELS = null
+function photoCanvas(img, w, h) {
+    let W = img.naturalWidth, H = img.naturalHeight
+    if (!PHOTO_PIXELS || PHOTO_PIXELS.src !== img.src) {
+        let c0 = document.createElement('canvas'); c0.width = W; c0.height = H
+        let g0 = c0.getContext('2d', { willReadFrequently: true }); g0.drawImage(img, 0, 0)
+        PHOTO_PIXELS = { src: img.src, data: g0.getImageData(0, 0, W, H).data, sized: new Map() }
+    }
+    let key = w + 'x' + h, out = PHOTO_PIXELS.sized.get(key)
+    if (!out) {
+        let S = PHOTO_PIXELS.data, D = new Uint8ClampedArray(w * h * 4)
+        if (w === W && h === H) D.set(S)
+        else for (let y = 0; y < h; y++) {
+            let y0 = Math.floor(y * H / h), y1 = Math.max(y0 + 1, Math.floor((y + 1) * H / h))
+            for (let x = 0; x < w; x++) {
+                let x0 = Math.floor(x * W / w), x1 = Math.max(x0 + 1, Math.floor((x + 1) * W / w)), r = 0, g = 0, b = 0, n = (x1 - x0) * (y1 - y0)
+                for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) { let i = (yy * W + xx) * 4; r += S[i]; g += S[i + 1]; b += S[i + 2] }
+                let o = (y * w + x) * 4; D[o] = Math.round(r / n); D[o + 1] = Math.round(g / n); D[o + 2] = Math.round(b / n); D[o + 3] = 255
+            }
+        }
+        out = new ImageData(D, w, h)
+        PHOTO_PIXELS.sized.set(key, out)
+    }
+    let c = document.createElement('canvas'); c.width = w; c.height = h
+    c.getContext('2d', { willReadFrequently: true }).putImageData(out, 0, 0)
+    return c
+}
+
 function amethystAnalysis(img, o) {
     let scale = Math.min(1, o.maxW / img.naturalWidth)
     let w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale)
-    let canvas = document.createElement('canvas')
-    canvas.width = w; canvas.height = h
-    canvas.getContext('2d').drawImage(img, 0, 0, w, h)
-    let src = cv.imread(canvas), rgb = new cv.Mat(), hsv = new cv.Mat(), mask = new cv.Mat()
-    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB)
-    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV)
-    let lo = new cv.Mat(h, w, hsv.type(), PURPLE_LO), hi = new cv.Mat(h, w, hsv.type(), PURPLE_HI)
-    cv.inRange(hsv, lo, hi, mask)
-    let k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3))
-    cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, k)
-    cv.morphologyEx(mask, mask, cv.MORPH_OPEN, k)
-    let raw = mask.clone() // unfilled mask: the camera fit uses its edges (filling changes silhouettes enough to shift the fit)
+    let hsv = photoHSV(img, w, h), hueShift = amethystHueShift(hsv), win = purpleWindows(hueShift), { raw, filled } = purpleMask(hsv, win)
     // looser "purple-ish" test used only to judge whether a cube's visible part is really amethyst: also accepts the pale pink texels
     // (low saturation) of big close cubes, still rejects brown dirt (orange hue) and grey stone (no saturation)
-    let loose = new cv.Mat(), llo = new cv.Mat(h, w, hsv.type(), [125, 25, 18, 0]), lhi = new cv.Mat(h, w, hsv.type(), [175, 255, 255, 255]) // hue from 125 (amethyst ~131-141) so bluish rock never counts; V from 18 for dim light
-    cv.inRange(hsv, llo, lhi, loose)
-    // fill holes: the pale pink highlights of a big (close) cube texture fail the saturation threshold and would punch holes in its silhouette
-    let contours = new cv.MatVector(), hier = new cv.Mat()
-    cv.findContours(mask, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    for (let i = 0; i < contours.size(); i++) cv.drawContours(mask, contours, i, new cv.Scalar(255), -1)
-    contours.delete(); hier.delete()
+    let loose = new cv.Mat() // hue from 125 (amethyst ~131-141) so bluish rock never counts; V from 18 for dim light
+    purpleInRange(hsv, win.looseLo, win.looseHi, loose)
     let data = new Uint8Array(w * h), rawData = new Uint8Array(w * h)
-    for (let i = 0; i < w * h; i++) { data[i] = mask.data[i] ? 1 : 0; rawData[i] = loose.data[i] ? 1 : 0 }
+    for (let i = 0; i < w * h; i++) { data[i] = filled.data[i] ? 1 : 0; rawData[i] = loose.data[i] ? 1 : 0 }
 
     let mf = new cv.Mat(), gx = new cv.Mat(), gy = new cv.Mat()
     raw.convertTo(mf, cv.CV_32F, 1 / 255)
@@ -84,8 +153,8 @@ function amethystAnalysis(img, o) {
     for (let i = cand.length - 1; i > 0; i--) { let j = Math.floor(rnd() * (i + 1)); [cand[i], cand[j]] = [cand[j], cand[i]] }
     let samples = cand.slice(0, o.nPix)
 
-    for (let m of [src, rgb, hsv, mask, raw, loose, llo, lhi, lo, hi, k, mf, gx, gy]) m.delete()
-    return { w, h, scale, data, raw: rawData, samples }
+    for (let m of [hsv, filled, raw, loose, mf, gx, gy]) m.delete()
+    return { w, h, scale, data, raw: rawData, samples, hueShift }
 }
 
 /**
@@ -107,21 +176,7 @@ function amethystAnalysis(img, o) {
 function extractMaskLines(img, an, opts) {
     let o = Object.assign({ maxW: 1600, epsilon: 1.5, minLen: 14, collinDeg: 3, maxRms: 1.0, minSide: 0.9, convexSolidity: 0.93, quadLoss: 0.012 }, opts)
     let scale = Math.min(1, o.maxW / img.naturalWidth), w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale)
-    let canvas = document.createElement('canvas')
-    canvas.width = w; canvas.height = h
-    canvas.getContext('2d').drawImage(img, 0, 0, w, h)
-    let src = cv.imread(canvas), rgb = new cv.Mat(), hsv = new cv.Mat(), mask = new cv.Mat()
-    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB)
-    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV)
-    let lo = new cv.Mat(h, w, hsv.type(), PURPLE_LO), hi = new cv.Mat(h, w, hsv.type(), PURPLE_HI)
-    cv.inRange(hsv, lo, hi, mask)
-    let k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3))
-    cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, k)
-    cv.morphologyEx(mask, mask, cv.MORPH_OPEN, k)
-    let fillC = new cv.MatVector(), fillH = new cv.Mat()
-    cv.findContours(mask, fillC, fillH, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    for (let i = 0; i < fillC.size(); i++) cv.drawContours(mask, fillC, i, new cv.Scalar(255), -1)
-    fillC.delete(); fillH.delete()
+    let hsv = photoHSV(img, w, h), { raw, filled: mask } = purpleMask(hsv, purpleWindows(an.hueShift))
     let M = new Uint8Array(w * h)
     for (let i = 0; i < w * h; i++) M[i] = mask.data[i] ? 1 : 0
 
@@ -216,7 +271,7 @@ function extractMaskLines(img, an, opts) {
         }
         c.delete()
     }
-    for (let mm of [src, rgb, hsv, mask, lo, hi, k]) mm.delete()
+    for (let mm of [hsv, raw, mask]) mm.delete()
     contours.delete(); hier.delete()
     // one straight side can still come out as 2+ pieces when a 1-2 px dent in the outline (a pale pixel on the edge) cut it: glue
     // pieces of the same blob that lie on one line (same direction within collinDeg, ends within collinPx of each other's line)
@@ -266,11 +321,7 @@ function refineLinesRGB(img, an, segs, opts) {
     let o = Object.assign({ maxW: 2400, R: 10, bandIn: 5, bandOut: 14, avgAlong: 4, minStations: 0.35, maxRms: 1.6 }, opts)
     let scale = Math.min(1, o.maxW / img.naturalWidth), w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale)
     if (!REFINE_PIXELS || REFINE_PIXELS.src !== img.src || REFINE_PIXELS.w !== w) { // the photo is read once, not at every call
-        let canvas = document.createElement('canvas')
-        canvas.width = w; canvas.height = h
-        let ctx = canvas.getContext('2d', { willReadFrequently: true })
-        ctx.drawImage(img, 0, 0, w, h)
-        REFINE_PIXELS = { src: img.src, w, data: ctx.getImageData(0, 0, w, h).data }
+        REFINE_PIXELS = { src: img.src, w, data: photoCanvas(img, w, h).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data }
     }
     let px = REFINE_PIXELS.data, k = w / an.w // an coords -> refine coords
     const rgbAt = (x, y, out) => { // bilinear
@@ -278,8 +329,7 @@ function refineLinesRGB(img, an, segs, opts) {
         let x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = (y0 * w + x0) * 4, j = i + w * 4
         for (let c = 0; c < 3; c++) out[c] = (px[i + c] * (1 - fx) + px[i + 4 + c] * fx) * (1 - fy) + (px[j + c] * (1 - fx) + px[j + 4 + c] * fx) * fy
     }
-    const maskAt = (x, y) => { // x,y in photo-resolution coords; the "is it amethyst here" test works in `an` coords (the mask by default, or o.sideFn)
-        if (o.sideFn) return o.sideFn(x / k, y / k)
+    const maskAt = (x, y) => { // x,y in photo-resolution coords; the "is it amethyst here" test reads the mask (an coords)
         let xi = Math.round(x / k), yi = Math.round(y / k); return xi >= 0 && xi < an.w && yi >= 0 && yi < an.h ? an.data[yi * an.w + xi] : 0
     }
     const inv3 = (m) => {
@@ -366,76 +416,9 @@ function refineLinesRGB(img, an, segs, opts) {
     return out
 }
 
-/**
- * EXPERIMENT: lines found with no binary mask. The HSV mask is used ONLY to learn what amethyst and rock look like in RGB
- * (global Fisher discriminant, amethyst seeds vs pixels >= 12 px away from any seed); from there on the geometry comes from
- * the soft map P (0 rock .. 1 amethyst, per pixel, from all three channels): Canny on P, probabilistic Hough, duplicate
- * suppression, then refineLinesRGB (side of the amethyst read from P, not from the mask).
- * Returns segments in an's resolution, same shape as extractMaskLines().segs (+ refined/shift/res).
- */
-function extractSoftLines(img, an, opts) {
-    let o = Object.assign({ maxW: 1600, blur: 1.2, canny1: 35, canny2: 90, houghThr: 35, minLen: 24, maxGap: 4, dupPx: 3, dupDeg: 3 }, opts)
-    let scale = Math.min(1, o.maxW / img.naturalWidth), w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale)
-    let canvas = document.createElement('canvas')
-    canvas.width = w; canvas.height = h
-    canvas.getContext('2d').drawImage(img, 0, 0, w, h)
-    let src = cv.imread(canvas), rgb = new cv.Mat(), hsv = new cv.Mat(), seed = new cv.Mat(), near = new cv.Mat()
-    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB); cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV)
-    let lo = new cv.Mat(h, w, hsv.type(), PURPLE_LO), hi = new cv.Mat(h, w, hsv.type(), PURPLE_HI)
-    cv.inRange(hsv, lo, hi, seed)
-    let kk = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(25, 25))
-    cv.dilate(seed, near, kk)
-    // class statistics (mean, covariance) of amethyst seeds and of rock far from any seed
-    let S = [{ n: 0, m: [0, 0, 0], q: new Array(9).fill(0) }, { n: 0, m: [0, 0, 0], q: new Array(9).fill(0) }], d = rgb.data
-    for (let i = 0; i < w * h; i += 3) { // every 3rd pixel is plenty
-        let c = seed.data[i] ? 1 : near.data[i] ? -1 : 0
-        if (c < 0) continue
-        let s = S[c], r = d[i * 3], g = d[i * 3 + 1], b = d[i * 3 + 2], v = [r, g, b]
-        s.n++
-        for (let a = 0; a < 3; a++) { s.m[a] += v[a]; for (let e = 0; e < 3; e++) s.q[a * 3 + e] += v[a] * v[e] }
-    }
-    let P = null
-    if (S[0].n > 500 && S[1].n > 200) {
-        let cov = new Array(9).fill(0)
-        for (let s of S) { for (let a = 0; a < 3; a++) s.m[a] /= s.n; for (let a = 0; a < 3; a++) for (let e = 0; e < 3; e++) cov[a * 3 + e] += (s.q[a * 3 + e] / s.n - s.m[a] * s.m[e]) / 2 }
-        for (let a = 0; a < 3; a++) cov[a * 4] += 4
-        let [ca, cb, cc, cd, ce, cf, cg, ch, ci2] = cov, A = ce * ci2 - cf * ch, B = -(cd * ci2 - cf * cg), C = cd * ch - ce * cg, det = ca * A + cb * B + cc * C
-        let inv = [A, -(cb * ci2 - cc * ch), cb * cf - cc * ce, B, ca * ci2 - cc * cg, -(ca * cf - cc * cd), C, -(ca * ch - cb * cg), ca * ce - cb * cd].map((v) => v / det)
-        let dm = [0, 1, 2].map((a) => S[1].m[a] - S[0].m[a]), wv = [0, 1, 2].map((a) => inv[a * 3] * dm[0] + inv[a * 3 + 1] * dm[1] + inv[a * 3 + 2] * dm[2])
-        let s0 = wv[0] * S[0].m[0] + wv[1] * S[0].m[1] + wv[2] * S[0].m[2], s1 = wv[0] * S[1].m[0] + wv[1] * S[1].m[1] + wv[2] * S[1].m[2]
-        P = new Float32Array(w * h)
-        for (let i = 0; i < w * h; i++) P[i] = Math.max(0, Math.min(1, ((wv[0] * d[i * 3] + wv[1] * d[i * 3 + 1] + wv[2] * d[i * 3 + 2]) - s0) / (s1 - s0)))
-    }
-    let segs = []
-    if (P) {
-        let p8 = new cv.Mat(h, w, cv.CV_8U), edges = new cv.Mat(), lines = new cv.Mat()
-        for (let i = 0; i < w * h; i++) p8.data[i] = Math.round(P[i] * 255)
-        cv.GaussianBlur(p8, p8, new cv.Size(0, 0), o.blur)
-        cv.Canny(p8, edges, o.canny1, o.canny2)
-        cv.HoughLinesP(edges, lines, 1, Math.PI / 360, o.houghThr, o.minLen, o.maxGap)
-        let raw = []
-        for (let i = 0; i < lines.rows; i++) { let x1 = lines.data32S[i * 4], y1 = lines.data32S[i * 4 + 1], x2 = lines.data32S[i * 4 + 2], y2 = lines.data32S[i * 4 + 3]; raw.push({ x1, y1, x2, y2, len: Math.hypot(x2 - x1, y2 - y1) }) }
-        raw.sort((a, b) => b.len - a.len)
-        const dist = (u, x, y) => Math.abs((x - u.x1) * (u.y2 - u.y1) - (y - u.y1) * (u.x2 - u.x1)) / u.len
-        let kept = []
-        for (let s of raw) { // drop a segment that lies on a longer one already kept (same direction, both ends on its line)
-            let dup = kept.some((u) => Math.acos(Math.min(1, Math.abs(((u.x2 - u.x1) * (s.x2 - s.x1) + (u.y2 - u.y1) * (s.y2 - s.y1)) / (u.len * s.len)))) * 180 / Math.PI < o.dupDeg && dist(u, s.x1, s.y1) < o.dupPx && dist(u, s.x2, s.y2) < o.dupPx)
-            if (!dup) kept.push(s)
-        }
-        let ks = an.w / w
-        segs = kept.map((s) => ({ x1: s.x1 * ks, y1: s.y1 * ks, x2: s.x2 * ks, y2: s.y2 * ks, len: s.len * ks, rms: 0, inFrac: 1, outFrac: 1 }))
-        for (let m of [p8, edges, lines]) m.delete()
-    }
-    for (let m of [src, rgb, hsv, seed, near, lo, hi, kk]) m.delete()
-    if (!P) return { segs: [], P: null }
-    let kS = w / an.w // an coords -> P coords
-    let sideFn = (x, y) => { let xi = Math.round(x * kS), yi = Math.round(y * kS); return xi >= 0 && xi < w && yi >= 0 && yi < h && P[yi * w + xi] > 0.5 ? 1 : 0 }
-    return { segs: refineLinesRGB(img, an, segs, { sideFn }), P, w, h }
-}
-
 /** For each line: the world axis (0=X, 1=Y/vertical, 2=Z) whose vanishing point, for camera `cal`, it points at best, and the angular error in degrees (axis = -1 if the error is over tolDeg). Sets line.axis and line.err. */
 function classifyLines(lines, cal, tolDeg) {
-    let an = cal.an, f = (an.h / 2) / Math.tan(cal.fov * Math.PI / 360), cx = an.w / 2, cy = an.h / 2
+    let an = cal.an, f = focalPx(cal.fov, an.h), cx = an.w / 2, cy = an.h / 2
     let ax = cameraAxes(cal.pitch, cal.yaw)
     let V = [ax.ex, ax.ey, ax.ez].map((d) => ({ w: d[2], x: cx * d[2] + f * d[0], y: cy * d[2] + f * d[1] }))
     for (let L of lines) {
@@ -451,6 +434,28 @@ function classifyLines(lines, cal, tolDeg) {
     }
 }
 
+/**
+ * Does this browser give back the pixels it was given? Some privacy settings and extensions add noise to what a page reads from a canvas
+ * (canvas fingerprinting protection); the whole stage 1 reads the photo that way. Draws a known 64x64 pattern and reads it back:
+ * returns the number of altered pixels (0 = exact). Plus a fingerprint of the photo as read (FNV-1a of its RGB at natural size), to compare browsers.
+ */
+function canvasReadbackCheck(img) {
+    let c = document.createElement('canvas'); c.width = 64; c.height = 64
+    let g = c.getContext('2d', { willReadFrequently: true })
+    for (let i = 0; i < 64; i++) { g.fillStyle = 'rgb(' + (i * 4) + ',' + (255 - i * 4) + ',' + ((i * 37) % 256) + ')'; g.fillRect(i, 0, 1, 64) }
+    let d = g.getImageData(0, 0, 64, 64).data, altered = 0
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { let k = (y * 64 + x) * 4; if (d[k] !== x * 4 || d[k + 1] !== 255 - x * 4 || d[k + 2] !== (x * 37) % 256) altered++ }
+    let photo = null
+    if (img && img.naturalWidth) {
+        let p = document.createElement('canvas'); p.width = img.naturalWidth; p.height = img.naturalHeight
+        let pg = p.getContext('2d', { willReadFrequently: true }); pg.drawImage(img, 0, 0)
+        let pd = pg.getImageData(0, 0, p.width, p.height).data, h = 2166136261
+        for (let i = 0; i < pd.length; i += 4) for (let ch = 0; ch < 3; ch++) { h ^= pd[i + ch]; h = Math.imul(h, 16777619) >>> 0 }
+        photo = h.toString(16).padStart(8, '0')
+    }
+    return { altered, photo }
+}
+
 /** Last template learned from a photo (8 orientations): photos taken in the same game share the texture, and a photo whose cubes are too small/far to learn from can start from it. A wrong one is caught by the texUsed safeguard. */
 let TEMPLATE_CACHE = null
 
@@ -462,11 +467,7 @@ let TEMPLATE_CACHE = null
 async function makeTextureContext(img) {
     if (typeof TEXTURE_DATA === 'undefined' || !TEXTURE_DATA.amethyst_block) return null
     let W = Math.min(2400, img.naturalWidth), sc = W / img.naturalWidth, H = Math.round(img.naturalHeight * sc)
-    let c = document.createElement('canvas')
-    c.width = W; c.height = H
-    let g = c.getContext('2d', { willReadFrequently: true })
-    g.drawImage(img, 0, 0, W, H)
-    let d = g.getImageData(0, 0, W, H).data, lum = new Float32Array(W * H)
+    let d = photoCanvas(img, W, H).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data, lum = new Float32Array(W * H)
     for (let i = 0; i < W * H; i++) lum[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]
     let timg = await new Promise((res) => { let im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = TEXTURE_DATA.amethyst_block })
     if (!timg) return null
@@ -494,7 +495,7 @@ async function makeTextureContext(img) {
  * Returns the number of faces averaged (0 = kept the project texture).
  */
 function learnTexture(tex, cal, poses) {
-    let W = tex.W, H = tex.H, f = (H / 2) / Math.tan(cal.fov * Math.PI / 360), ax = cameraAxes(cal.pitch, cal.yaw), axs = [ax.ex, ax.ey, ax.ez]
+    let W = tex.W, H = tex.H, f = focalPx(cal.fov, H), ax = cameraAxes(cal.pitch, cal.yaw), axs = [ax.ex, ax.ey, ax.ez]
     const lumAt = (x, y) => { x = Math.min(W - 1.001, Math.max(0, x)); y = Math.min(H - 1.001, Math.max(0, y)); let x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * W + x0, L = tex.lum; return (L[i] * (1 - fx) + L[i + 1] * fx) * (1 - fy) + (L[i + W] * (1 - fx) + L[i + W + 1] * fx) * fy }
     const norm = (a) => { let m = 0; for (let i = 0; i < 256; i++) m += a[i]; m /= 256; let s = 0; for (let i = 0; i < 256; i++) s += (a[i] - m) ** 2; s = Math.sqrt(s / 256) || 1; let o = new Float32Array(256); for (let i = 0; i < 256; i++) o[i] = (a[i] - m) / s; return o }
     const dih = (a, k) => { let o = new Float32Array(256); for (let v = 0; v < 16; v++) for (let u = 0; u < 16; u++) { let uu = u, vv = v; if (k & 1) uu = 15 - uu; if (k & 2) vv = 15 - vv; if (k & 4) { let t = uu; uu = vv; vv = t } o[v * 16 + u] = a[vv * 16 + uu] } return o }
@@ -550,7 +551,7 @@ function learnTexture(tex, cal, poses) {
  * than 0.5 and must not steer the lattice. Returns null when fewer than 3 faces can be judged.
  */
 function templateQuality(tex, cal, poses) {
-    let W = tex.W, H = tex.H, f = (H / 2) / Math.tan(cal.fov * Math.PI / 360), ax = cameraAxes(cal.pitch, cal.yaw), axs = [ax.ex, ax.ey, ax.ez], vals = []
+    let W = tex.W, H = tex.H, f = focalPx(cal.fov, H), ax = cameraAxes(cal.pitch, cal.yaw), axs = [ax.ex, ax.ey, ax.ez], vals = []
     const lumAt = (x, y) => { x = Math.min(W - 1.001, Math.max(0, x)); y = Math.min(H - 1.001, Math.max(0, y)); let x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * W + x0, L = tex.lum; return (L[i] * (1 - fx) + L[i + 1] * fx) * (1 - fy) + (L[i + W] * (1 - fx) + L[i + W + 1] * fx) * fy }
     const z = (a) => { let m = 0; for (let i = 0; i < 256; i++) m += a[i]; m /= 256; let s = 0; for (let i = 0; i < 256; i++) s += (a[i] - m) ** 2; s = Math.sqrt(s / 256) || 1; let o = new Float32Array(256); for (let i = 0; i < 256; i++) o[i] = (a[i] - m) / s; return o }
     let Tz = tex.Tv.map(z)
@@ -580,12 +581,12 @@ function templateQuality(tex, cal, poses) {
  * How well the real texture explains the visible faces of the cube centred at P (camera coords) for the geometry geo = {fov, ax}:
  * each visible face is sampled on a 16x16 grid (2x2 per texel) from the photo and correlated (zero-mean NCC, shading-invariant) with the
  * texture, best of 8 orientations. Texels whose pixel is not purple (an.raw) or is already explained by a nearer cell (cov) are ignored.
- * Returns {ncc, valid} (ncc averaged over faces weighted by valid texels) or null when fewer than 48 texels can be judged.
+ * Returns {ncc, valid} (ncc averaged over faces weighted by their area in the photo) or null when fewer than 48 texels can be judged.
  */
 function textureScore(tex, an, geo, P, cov) {
-    let W = tex.W, H = tex.H, f = (H / 2) / Math.tan(geo.fov * Math.PI / 360), ax = geo.ax, k = an.w / W, axs = [ax.ex, ax.ey, ax.ez]
+    let W = tex.W, H = tex.H, f = focalPx(geo.fov, H), ax = geo.ax, k = an.w / W, axs = [ax.ex, ax.ey, ax.ez]
     const lumAt = (x, y) => { x = Math.min(W - 1.001, Math.max(0, x)); y = Math.min(H - 1.001, Math.max(0, y)); let x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * W + x0, L = tex.lum; return (L[i] * (1 - fx) + L[i + 1] * fx) * (1 - fy) + (L[i + W] * (1 - fx) + L[i + W + 1] * fx) * fy }
-    let sum = 0, wsum = 0, patch = new Float32Array(256), ok = new Uint8Array(256)
+    let sum = 0, wsum = 0, tval = 0, patch = new Float32Array(256), ok = new Uint8Array(256)
     for (let a = 0; a < 3; a++) for (let sg of [-1, 1]) {
         let A = axs[a], U = axs[(a + 1) % 3], V = axs[(a + 2) % 3], fc = [P[0] + sg * 0.5 * A[0], P[1] + sg * 0.5 * A[1], P[2] + sg * 0.5 * A[2]]
         if (sg * (A[0] * fc[0] + A[1] * fc[1] + A[2] * fc[2]) >= 0) continue // back face
@@ -619,9 +620,14 @@ function textureScore(tex, an, geo, P, cov) {
             let r = sab / (Math.sqrt(saa * sbb) || 1)
             if (r > best) best = r
         }
-        sum += best * nvalid; wsum += nvalid
+        // weight = area of the face in the photo (x the fraction of its texels that can be judged): a face seen edge-on still has 256 texels, all sampled
+        // from a sliver of a few pixels, and its correlation is noise (a real cube scored 0.47 with 0.97 on its front face and 0.09 on a 1 px face)
+        let cs = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(([a1, b1]) => { let X = fc[0] + a1 * U[0] + b1 * V[0], Y = fc[1] + a1 * U[1] + b1 * V[1], Z = fc[2] + a1 * U[2] + b1 * V[2]; return [W / 2 + f * X / Z, H / 2 + f * Y / Z] }), ar = 0
+        for (let m = 0; m < 4; m++) ar += cs[m][0] * cs[(m + 1) % 4][1] - cs[(m + 1) % 4][0] * cs[m][1]
+        let wt = Math.abs(ar) / 2 * k * k * nvalid / 256
+        sum += best * wt; wsum += wt; tval += nvalid
     }
-    return wsum >= 48 ? { ncc: sum / wsum, valid: wsum } : null
+    return tval >= 48 && wsum > 0 ? { ncc: sum / wsum, valid: tval } : null
 }
 
 /**
@@ -634,44 +640,133 @@ function textureScore(tex, an, geo, P, cov) {
  *    (two far cells that together tile a region are really one nearer cube, which is tried first).
  * `res` is the lattice geometry; returns [{i,j,k,P,coverage}] in the same format as res.cubes.
  */
+/**
+ * The pixels of a cube silhouette and how many of them are purple in mask T. A non-purple pixel whose sample point lies within
+ * half a pixel diagonal (0.71 px) of the outline straddles it: part of it is outside the cube, so it is mixed, not evidence
+ * against the cube, and counts as purple (pur); purStrict counts them as not purple. Without this a small cube (side ~19 px,
+ * geode-04 cell -1,3,-4) failed the 97% rule on 13 such pixels all within 0.6 px of its outline, while its texture matched at 0.88.
+ * But the cell one step nearer along the depth axis is only a fraction of a pixel larger, so it passes the lenient count too:
+ * selectCellsByRay accepts a cell on the lenient count only when its texture matches strongly (synthetic far-9, close-2, close-5:
+ * the nearer wrong cell had 0.61-0.69 and replaced the right one).
+ */
+function hullPurple(hl, w, h, T) {
+    let px = [], pur = 0, purStrict = 0, n = hl.length, E = []
+    for (let e = 0; e < n; e++) { let a = hl[e], b = hl[(e + 1) % n], dx = b.x - a.x, dy = b.y - a.y; E.push({ a, dx, dy, L2: dx * dx + dy * dy || 1 }) }
+    const nearOutline = (x, y) => {
+        for (let e of E) { let t = Math.max(0, Math.min(1, ((x - e.a.x) * e.dx + (y - e.a.y) * e.dy) / e.L2)), ex = x - e.a.x - t * e.dx, ey = y - e.a.y - t * e.dy; if (ex * ex + ey * ey <= 0.5) return true }
+        return false
+    }
+    forEachPixelInHull(hl, w, h, (x, y) => { let q = y * w + x; px.push(q); if (T[q]) { pur++; purStrict++ } else if (nearOutline(x, y)) pur++ })
+    return { px, pur, purStrict }
+}
+
 function selectCellsByRay(res, an, opts) {
     let o = Object.assign({ minPurple: 0.97, loose: true, minFresh: 0.3, minFreshPx: 60, radius: 14, tex: null, minNcc: 0.25, texBase: opts && opts.tex && opts.tex.learned ? 0.4 : 0.25, texW: 120, texPen: 3.5, strongNcc: 0.75, minFreshStrong: 25 }, opts)
-    let w = an.w, h = an.h, f = (h / 2) / Math.tan(res.fov * Math.PI / 360), ax = res.ax, O = res.origin
+    let w = an.w, h = an.h, f = focalPx(res.fov, h), ax = res.ax
     const T = o.loose ? an.raw : an.data // mask the 'all purple inside' test reads: the strict one, or the loose one that also accepts pale pink texels
-    const at = (i, j, k) => [O[0] + i * ax.ex[0] + j * ax.ey[0] + k * ax.ez[0], O[1] + i * ax.ex[1] + j * ax.ey[1] + k * ax.ez[1], O[2] + i * ax.ex[2] + j * ax.ey[2] + k * ax.ez[2]]
     let pool = []
     for (let i = -o.radius; i <= o.radius; i++) for (let j = -o.radius; j <= o.radius; j++) for (let k = -o.radius; k <= o.radius; k++) {
-        let P = at(i, j, k)
+        let P = latticePoint(res, i, j, k)
         if (P[2] < 0.8) continue
         let sx = Math.round(w / 2 + f * P[0] / P[2]), sy = Math.round(h / 2 + f * P[1] / P[2])
         if (sx >= 0 && sx < w && sy >= 0 && sy < h && !T[sy * w + sx]) continue // the centre of a cube whose whole projection is purple is purple: cheap reject before building the hull
         let hl = cubeHull(P, ax, f, w / 2, h / 2)
         if (!hl) continue
-        let px = [], pur = 0
-        forEachPixelInHull(hl, w, h, (x, y) => { px.push(y * w + x); pur += T[y * w + x] })
+        let { px, pur, purStrict } = hullPurple(hl, w, h, T)
         if (px.length < 60 || px.length > w * h / 2 || pur / px.length < o.minPurple) continue
-        pool.push({ i, j, k, P, px, purple: pur / px.length })
+        pool.push({ i, j, k, P, px, purple: pur / px.length, borderOnly: purStrict / px.length < o.minPurple })
     }
     pool.sort((p, q) => p.P[2] - q.P[2]) // nearest first
-    let cov = new Uint8Array(w * h), cells = [], M = an.data, score = 0, texSum = 0
+    let cov = new Uint8Array(w * h), cells = [], M = an.data, score = 0, texSum = 0, owner = o.record ? new Int32Array(w * h) : null
     for (let c of pool) {
         let fresh = 0
         for (let q of c.px) if (!cov[q]) fresh++
         let small = fresh / c.px.length < o.minFresh || fresh < o.minFreshPx // little of it is visible: a nearer cube hides most of it
         if (small && !(o.tex && o.tex.learned && fresh >= o.minFreshStrong)) continue
         let ncc = null
+        if (c.borderOnly && !o.tex) continue // no texture to confirm it: the strict count decides
         if (o.tex) { // the real texture, warped onto the cell's visible faces, must look like the photo there (cells already explained by nearer ones are excluded)
             let ts = textureScore(o.tex, an, res, c.P, cov)
             if (ts) { ncc = ts.ncc; if (ncc < o.minNcc) continue }
+            if (c.borderOnly && !(ts && ncc >= o.strongNcc)) continue // purple enough only thanks to the pixels straddling its outline: the texture must confirm it (see hullPurple)
             if (small && !(ts && ncc >= o.strongNcc)) continue // a cube mostly hidden behind a nearer one is accepted only when its visible sliver matches the texture strongly (the sliver is real purple that a farther cell would otherwise explain wrongly)
         }
-        for (let q of c.px) if (!cov[q]) { cov[q] = 1; score += M[q] ? 1 : -CUBE_BG_WEIGHT }
+        for (let q of c.px) if (!cov[q]) { cov[q] = 1; score += M[q] ? 1 : -CUBE_BG_WEIGHT; if (owner) owner[q] = cells.length + 1 }
         if (ncc !== null) texSum += ncc >= o.texBase ? ncc - o.texBase : o.texPen * (ncc - o.texBase) // reward above the baseline, a much harsher penalty below it (a mask gain must not pay for a cell the texture rejects)
         cells.push({ i: c.i, j: c.j, k: c.k, P: c.P, coverage: c.purple, ncc })
     }
     cells.score = score - CUBE_COST * cells.length // how well this lattice geometry explains the mask: used to tune the geometry
     cells.total = cells.score + o.texW * texSum // + how well the real texture fits the chosen cells (smooth in depth, unlike the mask)
+    if (o.record) Object.assign(o.record, { owner, cells, opts: o })
     return cells
+}
+
+/**
+ * Why selectCellsByRay takes or rejects cell (i, j, k): every test it makes, with the value and the threshold, in the order it makes them. `record` comes from a
+ * selectCellsByRay call with the same geometry and options ({record: {}}): the cells are tried nearest first, so at this cell's turn the pixels already taken are
+ * exactly those of the accepted cells nearer than it, which the record tells. Also returns the pixels of the cell's silhouette split into free+purple,
+ * free+not purple and covered (mask resolution), to draw them.
+ */
+function explainCell(res, an, record, i, j, k) {
+    let o = record.opts, w = an.w, h = an.h, f = focalPx(res.fov, h), ax = res.ax, T = o.loose ? an.raw : an.data
+    let P = latticePoint(res, i, j, k)
+    let out = { i, j, k, P, z: P[2], checks: [], pix: { free: [], freeNotPurple: [], covered: [] }, coveredBy: [], ncc: null }
+    const check = (name, ok, value, need) => { out.checks.push({ name, ok, value, need }); return ok }
+    let fails = []
+    const test = (name, ok, value, need, reason) => { if (!check(name, ok, value, need)) fails.push(reason); return ok }
+    test('within the radius considered', Math.max(Math.abs(i), Math.abs(j), Math.abs(k)) <= o.radius, 'max(|i|,|j|,|k|) = ' + Math.max(Math.abs(i), Math.abs(j), Math.abs(k)), '≤ ' + o.radius, 'too far from the lattice centre: never considered')
+    if (!test('in front of the camera', P[2] >= 0.8, 'distance ' + P[2].toFixed(2), '≥ 0.8', 'behind or touching the camera')) { out.reason = fails[0]; out.taken = false; return out }
+    let sx = Math.round(w / 2 + f * P[0] / P[2]), sy = Math.round(h / 2 + f * P[1] / P[2]), inside = sx >= 0 && sx < w && sy >= 0 && sy < h
+    test('silhouette centre purple (quick check)', !inside || !!T[sy * w + sx], inside ? (T[sy * w + sx] ? 'yes' : 'no') : 'outside the photo', 'yes', 'the silhouette centre is not purple')
+    let hl = cubeHull(P, ax, f, w / 2, h / 2)
+    if (!hl) { fails.push('silhouette not computable'); out.reason = fails[0]; out.taken = false; return out }
+    let { px, pur, purStrict } = hullPurple(hl, w, h, T)
+    out.purpleStrict = px.length ? purStrict / px.length : 0
+    out.n = px.length; out.purple = px.length ? pur / px.length : 0
+    test('silhouette size', px.length >= 60 && px.length <= w * h / 2, px.length + ' px', '60 - ' + Math.round(w * h / 2) + ' px', px.length < 60 ? 'silhouette too small' : 'silhouette too large')
+    test('purple inside the silhouette (pixels straddling the outline count as purple)', out.purple >= o.minPurple, (100 * out.purple).toFixed(1) + '% (without them: ' + (100 * out.purpleStrict).toFixed(1) + '%)', '≥ ' + Math.round(100 * o.minPurple) + '%', 'the silhouette leaves the purple')
+    let borderOnly = out.purple >= o.minPurple && out.purpleStrict < o.minPurple
+    // pixels already taken at this cell's turn: those of the accepted cells nearer than it
+    let cov = new Uint8Array(w * h), by = new Map(), fresh = 0
+    for (let q = 0; q < w * h; q++) { let ow = record.owner[q]; if (ow && record.cells[ow - 1].P[2] < P[2]) cov[q] = 1 }
+    for (let q of px) {
+        if (cov[q]) { out.pix.covered.push(q); let cc = record.cells[record.owner[q] - 1], key = cc.i + ',' + cc.j + ',' + cc.k; by.set(key, (by.get(key) || 0) + 1) }
+        else { fresh++; (T[q] ? out.pix.free : out.pix.freeNotPurple).push(q) }
+    }
+    out.coveredBy = [...by.entries()].sort((a, b) => b[1] - a[1]).map(([key, n]) => ({ key, n }))
+    out.fresh = fresh; out.freeFrac = px.length ? fresh / px.length : 0
+    let small = out.freeFrac < o.minFresh || fresh < o.minFreshPx, strongOk = o.tex && o.tex.learned && fresh >= o.minFreshStrong
+    test('free part (not covered by nearer cubes already chosen)', !small || strongOk, fresh + ' px = ' + (100 * out.freeFrac).toFixed(0) + '%', '≥ ' + Math.round(100 * o.minFresh) + '% and ≥ ' + o.minFreshPx + ' px' + (o.tex && o.tex.learned ? ' (or ≥ ' + o.minFreshStrong + ' px if the texture matches ≥ ' + o.strongNcc + ')' : ''), 'almost all covered by nearer cubes')
+    if (o.tex) {
+        let ts = textureScore(o.tex, an, res, P, cov)
+        out.ncc = ts ? ts.ncc : null
+        if (o.minNcc > -1) test('match with the photo texture', !ts || ts.ncc >= o.minNcc, ts ? ts.ncc.toFixed(2) : 'not measurable', '≥ ' + o.minNcc.toFixed(2) + ' (threshold of this photo)', 'the texture does not match')
+        else check('match with the photo texture', true, ts ? ts.ncc.toFixed(2) : 'not measurable', 'no threshold: on this photo the texture is not used as a filter')
+        if (borderOnly) test('purple only thanks to the outline pixels: the texture must match strongly', !!ts && ts.ncc >= o.strongNcc, ts ? ts.ncc.toFixed(2) : 'not measurable', '≥ ' + o.strongNcc, 'purple only thanks to the outline and the texture does not confirm it')
+        if (small && strongOk) test('visible strip very similar to the texture', !!ts && ts.ncc >= o.strongNcc, ts ? ts.ncc.toFixed(2) : 'not measurable', '≥ ' + o.strongNcc, 'almost covered and the visible strip does not match the texture enough')
+    } else {
+        check('match with the photo texture', true, '-', 'texture not available on this photo')
+        if (borderOnly) test('purple only thanks to the outline pixels', false, 'no texture to confirm it', 'texture', 'purple only thanks to the outline and the texture does not confirm it')
+    }
+    out.taken = !fails.length
+    out.reason = fails[0] || null
+    out.inResult = record.cells.some((q) => q.i === i && q.j === j && q.k === k)
+    return out
+}
+
+/** Cells of the lattice crossed by the ray from the camera along direction d (camera coords, d[2] = 1), nearest first, as {i, j, k, z} (z = depth of the cell centre) */
+function latticeRayCells(res, d, zMin, zMax) {
+    let E = [res.ax.ex, res.ax.ey, res.ax.ez], O = res.origin, dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    let A = E.map((e) => -dot(O, e)), D = E.map((e) => dot(d, e)) // the ray in lattice coordinates: A + t D, t = depth along the camera axis
+    let t = zMin, cell = A.map((a, n) => Math.round(a + t * D[n])), out = []
+    let step = D.map((x) => Math.sign(x)), tDelta = D.map((x) => x ? 1 / Math.abs(x) : Infinity), tNext = D.map((x, n) => x ? (cell[n] + 0.5 * step[n] - A[n]) / x : Infinity)
+    while (t < zMax && out.length < 500) { // cell boundaries are at half-integers: the next one crossed is the nearest along the ray (voxel traversal)
+        let z = O[2] + cell[0] * E[0][2] + cell[1] * E[1][2] + cell[2] * E[2][2]
+        out.push({ i: cell[0], j: cell[1], k: cell[2], z })
+        let m = tNext[0] < tNext[1] ? (tNext[0] < tNext[2] ? 0 : 2) : (tNext[1] < tNext[2] ? 1 : 2)
+        t = tNext[m]; cell[m] += step[m]; tNext[m] += tDelta[m]
+    }
+    return out
 }
 
 /**
@@ -750,6 +845,12 @@ function cubeEdges(P, ax, f, cx, cy) {
 }
 
 /** Offset in lattice units -> camera coordinates */
+/** Focal length in px of a camera with vertical FOV fov (deg) on an image h px tall */
+function focalPx(fov, h) { return (h / 2) / Math.tan(fov * Math.PI / 360) }
+
+/** Camera-space centre of lattice cell (i, j, k) of a result {origin, ax} */
+function latticePoint(res, i, j, k) { let d = latticeOffset([i, j, k], res.ax); return [res.origin[0] + d[0], res.origin[1] + d[1], res.origin[2] + d[2]] }
+
 function latticeOffset(off, ax) {
     return [off[0] * ax.ex[0] + off[1] * ax.ey[0] + off[2] * ax.ez[0], off[0] * ax.ex[1] + off[1] * ax.ey[1] + off[2] * ax.ez[1], off[0] * ax.ex[2] + off[1] * ax.ey[2] + off[2] * ax.ez[2]]
 }
@@ -783,7 +884,7 @@ function solveCubePosition(rows, f, Pinit) {
  */
 function posesOfIsolatedCubes(cam, img, an, lab, opts) {
     let o = Object.assign({ minBlobPx: 150, minLines: 3, maxRms: 1.5, minIoU: 0.8, minIoU3: 0.88, contourIters: 5, measureIters: 2, contourOnlyIoU: 0.88, contourOnlyRms: 1 }, opts)
-    let w = an.w, h = an.h, cx = w / 2, cy = h / 2, f = (h / 2) / Math.tan(cam.fov * Math.PI / 360), ax = cameraAxes(cam.pitch, cam.yaw), label = lab.label
+    let w = an.w, h = an.h, cx = w / 2, cy = h / 2, f = focalPx(cam.fov, h), ax = cameraAxes(cam.pitch, cam.yaw), label = lab.label
     let VP = [ax.ex, ax.ey, ax.ez].map((d) => [f * d[0], f * d[1], d[2]])
     const lineTo = (x, y, a) => { let X = x - cx, Y = y - cy, V = VP[a], l = [Y * V[2] - V[1], V[0] - X * V[2], X * V[1] - Y * V[0]], n = Math.hypot(l[0], l[1]) || 1; return [l[0] / n, l[1] / n, l[2] / n] }
     const edgeDist = (e, q) => { let ex = e.q[0] - e.p[0], ey = e.q[1] - e.p[1], L2 = ex * ex + ey * ey || 1, t = Math.max(0, Math.min(1, ((q[0] - e.p[0]) * ex + (q[1] - e.p[1]) * ey) / L2)); return Math.hypot(q[0] - e.p[0] - t * ex, q[1] - e.p[1] - t * ey) }
@@ -838,7 +939,7 @@ function posesOfIsolatedCubes(cam, img, an, lab, opts) {
  */
 function posesOfCornerCubes(cam, an, segs, opts) {
     let o = Object.assign({ gap: 7, minPurple: 0.93, vertexPx: 4, minLen: 8 }, opts)
-    let w = an.w, h = an.h, cx = w / 2, cy = h / 2, f = (h / 2) / Math.tan(cam.fov * Math.PI / 360), ax = cameraAxes(cam.pitch, cam.yaw), T = an.raw, M = an.data
+    let w = an.w, h = an.h, cx = w / 2, cy = h / 2, f = focalPx(cam.fov, h), ax = cameraAxes(cam.pitch, cam.yaw), T = an.raw, M = an.data
     const inMask = (x, y) => { let X = Math.round(x), Y = Math.round(y); return X >= 0 && Y >= 0 && X < w && Y < h && M[Y * w + X] }
     const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1])
     let L = []
@@ -899,7 +1000,7 @@ function cubePoses(cam, img, an, segs, lab) {
  * Returns {O: origin, sup: [{q: pose, n: [i,j,k]}], px: rms misfit on the screen} or null.
  */
 function latticeConsensus(poses, cam, W, H, maxPx) {
-    let ax = cameraAxes(cam.pitch, cam.yaw), E = [ax.ex, ax.ey, ax.ez], f = (H / 2) / Math.tan(cam.fov * Math.PI / 360), best = null
+    let ax = cameraAxes(cam.pitch, cam.yaw), E = [ax.ex, ax.ey, ax.ez], f = focalPx(cam.fov, H), best = null
     const pr = (X) => [W / 2 + f * X[0] / X[2], H / 2 + f * X[1] / X[2]]
     const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
     for (let r of poses) {
@@ -1046,10 +1147,12 @@ function solveLattice(startCam, img, an, segs, lab, opts) {
         if (!con || con.sup.length < o.minSupport) break
         let asg = [], measured = []
         for (let s of con.sup) for (let q of s.q.segs) { asg.push({ s: q, u: q.axis, pos: [s.n[0] + q.off[0], s.n[1] + q.off[1], s.n[2] + q.off[2]] }); measured.push(q) }
-        let cand = { pitch: cam.pitch, yaw: cam.yaw, fov: cam.fov, origin: con.O, ax: cameraAxes(cam.pitch, cam.yaw), refIoU: 0, support: con.sup.length, px: con.px, allSegs: segs.concat(measured) }
+        // the candidate carries the camera and origin SOLVED on the lines of its agreeing cubes, not the camera it started from: when a later round
+        // loses a borderline cube and agrees on fewer, this round wins, and its unsolved camera was ~1 deg off (geode-03: 37 wrong cubes instead of 28)
+        let v = asg.length >= 6 ? solveCameraOnLines([cam.pitch, cam.yaw, cam.fov, con.O[0], con.O[1], con.O[2]], asg, W, H, o.fovFixed ? [2] : []) : [cam.pitch, cam.yaw, cam.fov, con.O[0], con.O[1], con.O[2]]
+        let cand = { pitch: v[0], yaw: v[1], fov: v[2], origin: [v[3], v[4], v[5]], ax: cameraAxes(v[0], v[1]), refIoU: 0, support: con.sup.length, px: con.px, allSegs: segs.concat(measured) }
         if (!best || cand.support > best.support || (cand.support === best.support && cand.px < best.px)) best = cand
         if (asg.length < 6) break
-        let v = solveCameraOnLines([cam.pitch, cam.yaw, cam.fov, con.O[0], con.O[1], con.O[2]], asg, W, H, o.fovFixed ? [2] : [])
         let moved = Math.abs(v[0] - cam.pitch) + Math.abs(v[1] - cam.yaw) + Math.abs(v[2] - cam.fov)
         cam = { pitch: v[0], yaw: v[1], fov: v[2] }
         if (moved < 0.02) break
@@ -1071,7 +1174,8 @@ function chooseCells(geo, an, tex) {
         g.texGate = thr
         g.texUsed = gated.length >= 0.7 * plain.length
         cur = g.texUsed ? gated : plain
-    } else cur = selectCellsByRay(g, an, {})
+        g.selOpts = { tex, minNcc: g.texUsed ? thr : -2 }
+    } else { cur = selectCellsByRay(g, an, {}); g.selOpts = {} }
     g.cubesRay = cur
     return g
 }
@@ -1138,7 +1242,7 @@ function cameraFromLines(segs, an, opts) {
     for (let g of cands) {
         let vy = cy + Math.tan(g.u) * an.h
         for (let fov of fovs) {
-            let f = (an.h / 2) / Math.tan(fov * Math.PI / 360), pitch = Math.atan(f / (vy - cy)) * 180 / Math.PI // vanishing point below the centre = looking down
+            let f = focalPx(fov, an.h), pitch = Math.atan(f / (vy - cy)) * 180 / Math.PI // vanishing point below the centre = looking down
             for (let yaw = 0; yaw < 90; yaw += o.yawStep) { let v = lineCameraCost(S, an, [pitch, yaw, fov]); if (v < best[0]) { best = [v, pitch, yaw, fov]; vpY = vy } }
         }
     }
@@ -1176,7 +1280,7 @@ async function autoCalibrate(img, opts) {
 
     /** How many of the sampled edge pixels (weighted) point at one of the 3 world-axis vanishing points for this camera; tolSin = sin of the angular tolerance */
     function score(pitch, yaw, fov, samples, tolSin) {
-        let f = (an.h / 2) / Math.tan(fov * Math.PI / 360)
+        let f = focalPx(fov, an.h)
         let ax = cameraAxes(pitch, yaw)
         let V = [ax.ex, ax.ey, ax.ez].map((d) => ({ w: d[2], x: cx * d[2] + f * d[0], y: cy * d[2] + f * d[1] }))
         let tot = 0

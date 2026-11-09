@@ -13,11 +13,25 @@ let calibrationListenersBound = false // stage-1 panel listeners are wired once
 
 /** The synthetic test scenes (reference/synthetic/tools/synth_page.js), with known truth: the same seeds as the tests. Generated when first picked, not stored: inlining the images would add ~10 MB. */
 const SYNTH_SCENES = [
-	...[1, 2, 3, 5, 6, 7, 9, 10].map((seed) => ({ key: 'synth-far-' + seed, group: 'Sintetiche lontane', label: 'lontana, seed ' + seed, seed, opts: {} })),
-	...[1, 2, 3, 4, 5, 6, 7, 8].map((seed) => ({ key: 'synth-close-' + seed, group: 'Sintetiche ravvicinate', label: 'ravvicinata, seed ' + seed, seed, opts: { DR: [6, 10], RR: [3.5, 5] } })),
-	...[4, 11, 12, 13].map((seed) => ({ key: 'synth-dark-' + seed, group: 'Sintetiche scure', label: 'scura, seed ' + seed, seed, opts: { bright: 0.35 } })),
+	...[1, 2, 3, 5, 6, 7, 9, 10].map((seed) => ({ key: 'synth-far-' + seed, group: 'Synthetic, far', label: 'far, seed ' + seed, seed, opts: {} })),
+	...[1, 2, 3, 4, 5, 6, 7, 8].map((seed) => ({ key: 'synth-close-' + seed, group: 'Synthetic, close-up', label: 'close-up, seed ' + seed, seed, opts: { DR: [6, 10], RR: [3.5, 5] } })),
+	...[4, 11, 12, 13].map((seed) => ({ key: 'synth-dark-' + seed, group: 'Synthetic, dark', label: 'dark, seed ' + seed, seed, opts: { bright: 0.35 } })),
 ]
 let synthLoadToken = 0
+/** The probe cube of stage 1: a lattice cell on the ray through the mouse, moved along it with the wheel; the panel shows every test of the cell rule on it. {mx, my, cells, idx, frozen, info} or null */
+let probe = null
+/** Zoom of the stage-1 photo (CSS transform of the canvas inside calibration_zoom_box): scale s >= 1 and offset (tx, ty) in CSS px; drag = pan */
+let photoZoom = { s: 1, tx: 0, ty: 0, down: null, dragged: false }
+
+function applyPhotoZoom() {
+	let z = photoZoom, bw = calibration_zoom_box.clientWidth, bh = calibration_zoom_box.clientHeight
+	z.s = Math.max(1, Math.min(12, z.s))
+	z.tx = Math.min(0, Math.max(bw - bw * z.s, z.tx)); z.ty = Math.min(0, Math.max(bh - bh * z.s, z.ty)) // the photo always covers the box
+	calibration_canvas.style.transform = z.s === 1 ? '' : 'translate(' + z.tx + 'px,' + z.ty + 'px) scale(' + z.s + ')'
+	calibration_canvas.style.cursor = z.s > 1 ? 'grab' : ''
+}
+
+function resetPhotoZoom() { photoZoom.s = 1; photoZoom.tx = 0; photoZoom.ty = 0; applyPhotoZoom() }
 let autoTruth = null // the true cubes and camera of the scene shown, when it is a synthetic one
 
 /** Adds the synthetic scenes to the photo menu (only if the generator is there) */
@@ -55,7 +69,7 @@ function scoreAgainstTruth(A, T) {
 	return { recall: best / T.cubes.length, precision: best / Math.max(1, A.cubes.length), dFov: A.fov - T.fov, dPitch: A.pitch - T.pitch, dYaw: ((A.yaw - T.yaw + 45 + 900) % 90) - 45 }
 }
 
-/** Automatic calibration (see cameraFromLines/solveLattice in js/CalibrationTools.js): fitted camera + lattice cubes, computed once per photo (or on "Ricalcola") */
+/** Automatic calibration (see cameraFromLines/solveLattice in js/CalibrationTools.js): fitted camera + lattice cubes, computed once per photo (or on "Recompute") */
 let autoCal = null, autoCubes = null, autoCalState = 'idle' // idle | running | done
 let autoLive = null // latest progress report while running (phase, score...), shown in the stats panel
 /** Announces a step that has no progress callback of its own (the panel would keep showing the previous label while the step runs); waits for a repaint before the step starts */
@@ -71,10 +85,12 @@ let autoCalToken = 0 // bumped by each (re)run, so an older run still in flight 
 /** Switches stage 1 to another built-in photo: drops everything computed for the previous one (camera fit, lines, cubes) and cancels a run still in flight */
 function loadCalibrationPhoto(key) {
 	autoCalToken++ // an older automatic run still in flight cancels itself
-	autoCalState = 'idle'; autoCal = null; autoCubes = null; autoLive = null; autoMask = null; autoTruth = null
+	autoCalState = 'idle'; autoCal = null; autoCubes = null; autoLive = null; autoMask = null; autoTruth = null; probe = null
+	if (typeof calibration_zoom_box !== 'undefined') resetPhotoZoom()
 	let want = ++synthLoadToken, scene = SYNTH_SCENES.find((s) => s.key === key)
 	if (scene && !PHOTO_DATA[key]) { prepareSynthScene(scene).then(() => { if (want === synthLoadToken) loadCalibrationPhoto(key) }); return }
 	if (scene) autoTruth = scene.truth
+	loadManualEdits(key)
 	calibrationImage = new Image()
 	calibrationImage.onload = () => { if (currentStage === 1) renderCalibrationStage() }
 	calibrationImage.src = PHOTO_DATA[key]
@@ -100,13 +116,13 @@ let settings = {
 }
 
 const STAGE_NAMES = {
-	1: 'Foto + linee rilevate',
-	2: 'Geoide',
-	3: 'Confini stretti',
-	4: 'Confini validi',
-	5: 'Raggruppamenti (max 12 blocchi)',
-	6: 'Materiali (slime/honey)',
-	7: 'Flying machines (una per gruppo)',
+	1: 'Photo + detected cubes',
+	2: 'Geode',
+	3: 'Tight borders',
+	4: 'Valid borders',
+	5: 'Groups (max 12 blocks)',
+	6: 'Materials (slime/honey)',
+	7: 'Flying machines (one per group)',
 }
 const LAST_STAGE = 7
 
@@ -183,9 +199,7 @@ function exportVein() {
 	// compact form (size + ore coordinates) instead of the full matrix - see veinToSparse() in Tools.js.
 	// Load it back with veinFromExport(); the old dense {seed, vein} format loads there too.
 	let json = JSON.stringify({ seed: pipeline.seed, ...veinToSparse(pipeline.vein.matrix) })
-	navigator.clipboard.writeText(json).then(() => {
-		flashStageMessage('Vena copiata negli appunti')
-	}).catch(() => {
+	copyText(json, 'Vein copied to the clipboard', () => {
 		// clipboard unavailable (e.g. opened via file://, or permission denied) - fall back to a download
 		let blob = new Blob([json], { type: 'application/json' })
 		let url = URL.createObjectURL(blob)
@@ -209,10 +223,10 @@ function renderCalibrationStage() {
 	// side of the screen and would swallow drags meant for the VP handles; 'm' still toggles it back
 	settings_menu.style.display = 'none'
 
-	if (stage_info) stage_info.innerHTML = 'Stage 1/' + LAST_STAGE + ' - ' + STAGE_NAMES[1] + ' (tasti 1-' + LAST_STAGE + ' per cambiare)'
+	if (stage_info) stage_info.innerHTML = 'Stage 1/' + LAST_STAGE + ' - ' + STAGE_NAMES[1] + ' (keys 1-' + LAST_STAGE + ' to switch)'
 
 	if (!calibrationImage.complete || calibrationImage.naturalWidth === 0) {
-		if (stage_info) stage_info.innerHTML += ' | caricamento foto...'
+		if (stage_info) stage_info.innerHTML += ' | loading photo...'
 		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 200)
 		return
 	}
@@ -239,7 +253,7 @@ function renderCalibrationStage() {
 async function runAutoCalibration() {
 	let token = ++autoCalToken
 	let alive = () => token === autoCalToken
-	autoCal = null; autoCubes = null; autoLive = null; autoMask = null; autoLines = null
+	autoCal = null; autoCubes = null; autoLive = null; autoMask = null; autoLines = null; probe = null
 	let fov = parseFloat(calibration_fov.value)
 	await setPhase('mask')
 	if (!alive()) return
@@ -318,6 +332,68 @@ async function runAutoCalibration() {
 	autoCubes = result; autoLive = null
 	autoCalState = 'done'
 	redrawCalibrationCanvas()
+	usePhotoVein()
+}
+
+/**
+ * Manual corrections of the automatic cubes, per photo, kept in this browser (localStorage): [{P, add}], P = camera-space centre
+ * of the cell (blocks), add = true to add a cube the automatic choice missed, false to remove one it took. Stored by position, not by
+ * cell index, so they survive a change of the lattice origin: each edit applies to the cell whose centre is within 0.3 of P.
+ */
+let manualEdits = [], manualEditsPhoto = null
+function loadManualEdits(photo) { manualEditsPhoto = photo; try { manualEdits = JSON.parse(localStorage.getItem('autominer.edits.' + photo) || '[]') } catch (e) { manualEdits = [] } }
+function saveManualEdits() { try { localStorage.setItem('autominer.edits.' + manualEditsPhoto, JSON.stringify(manualEdits)) } catch (e) {} }
+
+/** The lattice cell (i, j, k) whose centre is P (within 0.3 blocks), or null */
+function cellAt(A, P) {
+	let d = [P[0] - A.origin[0], P[1] - A.origin[1], P[2] - A.origin[2]], f = [A.ax.ex, A.ax.ey, A.ax.ez].map((e) => d[0] * e[0] + d[1] * e[1] + d[2] * e[2]), c = f.map(Math.round)
+	return Math.hypot(f[0] - c[0], f[1] - c[1], f[2] - c[2]) < 0.3 ? c : null
+}
+
+/** The cubes after the manual corrections: {cubes, removed} (removed = automatic cubes the user took out; added ones have manual: true) */
+function finalCubes() {
+	if (!autoCubes) return { cubes: [], removed: [] }
+	let key = (i, j, k) => i + ',' + j + ',' + k, out = new Map(autoCubes.cubes.map((c) => [key(c.i, c.j, c.k), c])), removed = []
+	for (let e of manualEdits) {
+		let c = cellAt(autoCubes, e.P)
+		if (!c) continue
+		let k = key(...c)
+		if (e.add && !out.has(k)) out.set(k, { i: c[0], j: c[1], k: c[2], P: latticePoint(autoCubes, ...c), manual: true })
+		if (!e.add && out.has(k)) { removed.push(out.get(k)); out.delete(k) }
+	}
+	return { cubes: [...out.values()], removed }
+}
+
+/** Puts the probe cell in the result or takes it out (key x): the manual choice overrides the automatic one */
+function toggleProbeCube() {
+	if (!probe || !probe.info || !autoCubes) return
+	let I = probe.info, same = (c) => c && c[0] === I.i && c[1] === I.j && c[2] === I.k
+	let wasIn = finalCubes().cubes.some((q) => same([q.i, q.j, q.k])), inAuto = autoCubes.cubes.some((q) => same([q.i, q.j, q.k]))
+	manualEdits = manualEdits.filter((e) => !same(cellAt(autoCubes, e.P))) // back to the automatic state of this cell...
+	if (inAuto === wasIn) manualEdits.push({ P: latticePoint(autoCubes, I.i, I.j, I.k), add: !wasIn }) // ...then flipped, if that does not flip it already
+	saveManualEdits()
+	redrawCalibrationCanvas()
+	usePhotoVein()
+}
+
+function clearManualEdits() { manualEdits = []; saveManualEdits(); redrawCalibrationCanvas(); usePhotoVein() }
+
+/**
+ * Stages 2-7 work on the cubes of the photo shown in stage 1 (after the manual corrections) instead of a random vein. The lattice
+ * axes are a mirror image of Minecraft's (cameraAxes: right x down = -forward, determinant -1), so x is flipped to keep the geode's
+ * handedness; j is up. The random vein ('r' or the generate button) still works and stays until the next photo result.
+ */
+function usePhotoVein() {
+	let { cubes } = finalCubes()
+	if (!cubes.length) return
+	const M = 2 // empty cells around it, as the random vein has
+	let lo = [0, 1, 2].map((a) => Math.min(...cubes.map((c) => [c.i, c.j, c.k][a]))), hi = [0, 1, 2].map((a) => Math.max(...cubes.map((c) => [c.i, c.j, c.k][a])))
+	let ores = cubes.map((c) => [hi[0] - c.i + M, c.j - lo[1] + M, c.k - lo[2] + M])
+	let parsed = veinFromExport({ seed: 1, size: [0, 1, 2].map((a) => hi[a] - lo[a] + 1 + 2 * M), ores })
+	processVein(parsed.vein, parsed.seed)
+	pipeline.source = manualEditsPhoto
+	addDebugInfo()
+	if (currentStage !== 1) renderStage(currentStage)
 }
 
 /** Purple mask -> canvas (translucent purple where the mask is set), for the overlay tint */
@@ -328,6 +404,59 @@ function maskToCanvas(an) {
 	for (let i = 0; i < an.w * an.h; i++) if (an.data[i]) { img.data[i * 4] = 255; img.data[i * 4 + 1] = 0; img.data[i * 4 + 2] = 255; img.data[i * 4 + 3] = 110 }
 	ctx.putImageData(img, 0, 0)
 	return c
+}
+
+/** The 12 edges of a cube as pairs of cubeCorners() indices */
+const CUBE_EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]]
+
+/**
+ * The visible parts of the 12 edges of every cube (cube centres Ps in camera space), as 3D segments per cube.
+ * A point X of an edge is visible when the camera ray to it does not pass through the inside of any cube before reaching X
+ * (slab test on each box along the lattice axes). The cube itself is tested too: that hides its own back edges, while
+ * front and outline edges only touch its surface. So the hidden edges are exact for every cube (also the bottom face of
+ * the cubes above the camera), and edges behind nearer cubes are cut where they disappear. Sampled every ~3 px on screen.
+ */
+function visibleCubeEdges(Ps, ax, f, cx, cy) {
+	const E = [ax.ex, ax.ey, ax.ez], EPS = 1e-6
+	let boxes = Ps.map((P) => {
+		let C = cubeCorners(P, ax), xs = [], ys = [], zMin = Infinity
+		for (let q of C) { if (q[2] > 0.05) { xs.push(cx + f * q[0] / q[2]); ys.push(cy + f * q[1] / q[2]) } zMin = Math.min(zMin, q[2]) }
+		let all = xs.length === 8 // a box crossing the camera plane: no screen box, always tested
+		return { P, C, zMin, x0: all ? Math.min(...xs) : -Infinity, x1: all ? Math.max(...xs) : Infinity, y0: all ? Math.min(...ys) : -Infinity, y1: all ? Math.max(...ys) : Infinity, c: E.map((e) => P[0] * e[0] + P[1] * e[1] + P[2] * e[2]) }
+	})
+	const hidden = (X, sx, sy) => { // ray o = 0, d = X: t = 1 reaches X
+		let dx = E.map((e) => X[0] * e[0] + X[1] * e[1] + X[2] * e[2])
+		for (let b of boxes) {
+			if (b.zMin >= X[2] || sx < b.x0 || sx > b.x1 || sy < b.y0 || sy > b.y1) continue
+			let tIn = -Infinity, tOut = Infinity
+			for (let a = 0; a < 3; a++) {
+				if (Math.abs(dx[a]) < 1e-12) { if (Math.abs(b.c[a]) > 0.5) { tIn = Infinity; break } continue }
+				let t1 = (b.c[a] - 0.5) / dx[a], t2 = (b.c[a] + 0.5) / dx[a]
+				tIn = Math.max(tIn, Math.min(t1, t2)); tOut = Math.min(tOut, Math.max(t1, t2))
+			}
+			if (tOut - tIn > EPS && tIn < 1 - EPS) return true // the ray goes through this box's inside before reaching X
+		}
+		return false
+	}
+	return boxes.map((b) => {
+		let out = []
+		for (let [i, j] of CUBE_EDGES) {
+			let A = b.C[i], B = b.C[j]
+			if (A[2] < 0.3 && B[2] < 0.3) continue
+			let pa = projectCam(A, f, cx, cy), pb = projectCam(B, f, cx, cy), n = Math.max(2, Math.min(200, Math.ceil(Math.hypot(pb.x - pa.x, pb.y - pa.y) / 3)))
+			let start = -1
+			for (let s = 0; s <= n; s++) {
+				let vis = false
+				if (s < n) {
+					let t = (s + 0.5) / n, X = [A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1]), A[2] + t * (B[2] - A[2])]
+					vis = X[2] > 0.3 && !hidden(X, cx + f * X[0] / X[2], cy + f * X[1] / X[2])
+				}
+				if (vis && start < 0) start = s
+				if (!vis && start >= 0) { let t0 = start / n, t1 = s / n; out.push([A.map((v, k) => v + t0 * (B[k] - v)), A.map((v, k) => v + t1 * (B[k] - v))]); start = -1 }
+			}
+		}
+		return out
+	})
 }
 
 /** Draws a 3D segment (camera-space endpoints A, B), clipped to the near plane, as a 2D line */
@@ -353,16 +482,15 @@ function drawAutoOverlay(ctx, canvas) {
 		}
 	}
 	if (!autoCubes || !autoCubes.cubes.length) return
-	let f = (canvas.height / 2) / Math.tan(autoCubes.fov * Math.PI / 360), cx = canvas.width / 2, cy = canvas.height / 2
-	let ax = autoCubes.ax, O = autoCubes.origin
-	let at = (a, b, c) => [O[0] + a * ax.ex[0] + b * ax.ey[0] + c * ax.ez[0], O[1] + a * ax.ex[1] + b * ax.ey[1] + c * ax.ez[1], O[2] + a * ax.ex[2] + b * ax.ey[2] + c * ax.ez[2]]
-	let cubes = autoCubes.cubes
+	let f = focalPx(autoCubes.fov, canvas.height), cx = canvas.width / 2, cy = canvas.height / 2
+	let ax = autoCubes.ax, at = (i, j, k) => latticePoint(autoCubes, i, j, k)
+	let { cubes, removed } = finalCubes() // the automatic choice with the manual corrections
 	let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
 	for (let c of cubes) { let v = [c.i, c.j, c.k]; for (let n = 0; n < 3; n++) { lo[n] = Math.min(lo[n], v[n]); hi[n] = Math.max(hi[n], v[n]) } }
 
 	if (calibration_show_diff.checked && autoCal && autoCal.an) {
 		// where the union of the detected cubes disagrees with the purple mask (mask resolution, drawn scaled up): red = covered but not purple, blue = purple but not covered
-		let an = autoCal.an, fm = (an.h / 2) / Math.tan(autoCubes.fov * Math.PI / 360), cov = new Uint8Array(an.w * an.h)
+		let an = autoCal.an, fm = focalPx(autoCubes.fov, an.h), cov = new Uint8Array(an.w * an.h)
 		for (let c of cubes) {
 			let hl = cubeHull(at(c.i, c.j, c.k), ax, fm, an.w / 2, an.h / 2)
 			if (hl) forEachPixelInHull(hl, an.w, an.h, (x, y) => { cov[y * an.w + x] = 1 })
@@ -386,16 +514,16 @@ function drawAutoOverlay(ctx, canvas) {
 		for (let k = lo[2] - 0.5; k <= hi[2] + 0.51; k++) drawSeg3D(ctx, at(lo[0] - 0.5, y, k), at(hi[0] + 0.5, y, k), f, cx, cy)
 	}
 	if (calibration_show_cubes.checked) {
-		const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]]
 		ctx.lineWidth = 2
-		for (let c of cubes) {
-			let t = hi[1] > lo[1] ? (c.j - lo[1]) / (hi[1] - lo[1]) : 0 // colour by height: low = yellow, high = orange/red
-			ctx.strokeStyle = 'hsl(' + Math.round(55 - 55 * t) + ',100%,55%)'
-			let C = cubeCorners(at(c.i, c.j, c.k), ax)
-			let far = 0
-			for (let q = 1; q < 8; q++) if (C[q][2] > C[far][2]) far = q // the corner farthest from the camera is hidden, and so are the 3 edges meeting there
-			for (let [a, b] of EDGES) if (a !== far && b !== far) drawSeg3D(ctx, C[a], C[b], f, cx, cy)
-		}
+		let runs = visibleCubeEdges(cubes.map((c) => at(c.i, c.j, c.k)), ax, f, cx, cy)
+		cubes.forEach((c, n) => {
+			let t = hi[1] > lo[1] ? (c.j - lo[1]) / (hi[1] - lo[1]) : 0 // colour by height: low = yellow, high = orange/red; added by hand = cyan
+			ctx.strokeStyle = c.manual ? '#22d3ee' : 'hsl(' + Math.round(55 - 55 * t) + ',100%,55%)'
+			for (let [A, B] of runs[n]) drawSeg3D(ctx, A, B, f, cx, cy)
+		})
+		ctx.save(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.setLineDash([4, 4]) // taken out by hand: thin dashed, all 12 edges
+		for (let c of removed) { let C = cubeCorners(c.P, ax); for (let [a, b] of CUBE_EDGES) drawSeg3D(ctx, C[a], C[b], f, cx, cy) }
+		ctx.restore()
 		if (calibration_show_labels.checked) {
 			ctx.font = '12px sans-serif'; ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3
 			for (let c of cubes) {
@@ -404,6 +532,111 @@ function drawAutoOverlay(ctx, canvas) {
 			}
 		}
 	}
+	if (probe && probe.info) drawProbe(ctx, canvas, at, f, cx, cy, ax)
+}
+
+/** The probe cube: its silhouette split into free+purple (green), free but not purple (red) and covered by nearer cubes (grey), and its 12 edges (the 3 hidden ones dashed) */
+function drawProbe(ctx, canvas, at, f, cx, cy, ax) {
+	let I = probe.info, an = autoCal.an
+	if (!probe.tint) {
+		let tc = document.createElement('canvas'); tc.width = an.w; tc.height = an.h
+		let tctx = tc.getContext('2d'), img = tctx.createImageData(an.w, an.h)
+		const paint = (list, r, g, b, a) => { for (let q of list) { img.data[q * 4] = r; img.data[q * 4 + 1] = g; img.data[q * 4 + 2] = b; img.data[q * 4 + 3] = a } }
+		paint(I.pix.free, 40, 255, 120, 110); paint(I.pix.freeNotPurple, 255, 40, 40, 170); paint(I.pix.covered, 150, 150, 150, 150)
+		tctx.putImageData(img, 0, 0)
+		probe.tint = tc
+	}
+	ctx.imageSmoothingEnabled = false
+	ctx.drawImage(probe.tint, 0, 0, canvas.width, canvas.height)
+	ctx.imageSmoothingEnabled = true
+	let P = at(I.i, I.j, I.k), C = cubeCorners(P, ax)
+	ctx.save(); ctx.lineWidth = 3; ctx.strokeStyle = I.taken ? '#22ff88' : '#ff4d4d'
+	ctx.setLineDash([6, 5]); for (let [a, b] of CUBE_EDGES) drawSeg3D(ctx, C[a], C[b], f, cx, cy) // all 12 dashed (the hidden ones stay dashed)...
+	ctx.setLineDash([]); for (let [A, B] of visibleCubeEdges([P], ax, f, cx, cy)[0]) drawSeg3D(ctx, A, B, f, cx, cy) // ...the visible ones solid on top
+	ctx.restore()
+}
+
+/** Lattice cells under the mouse (canvas px), nearest first */
+function probeRayCells(mx, my) {
+	let canvas = calibration_canvas, fc = focalPx(autoCubes.fov, canvas.height)
+	return latticeRayCells(autoCubes, [(mx - canvas.width / 2) / fc, (my - canvas.height / 2) / fc, 1], 0.8, 80)
+}
+
+/** Puts the probe on the ray through (mx, my), on the cell whose depth is nearest to zWanted */
+function placeProbe(mx, my, zWanted) {
+	let cells = probeRayCells(mx, my), idx = 0
+	for (let n = 1; n < cells.length; n++) if (Math.abs(cells[n].z - zWanted) < Math.abs(cells[idx].z - zWanted)) idx = n
+	probe = Object.assign(probe || { frozen: false }, { mx, my, cells, idx })
+	updateProbeInfo()
+}
+
+/** Explains the cell under the probe with the same rule and options that chose the cubes */
+function updateProbeInfo() {
+	let c = probe.cells[probe.idx]
+	if (probe.info && probe.info.i === c.i && probe.info.j === c.j && probe.info.k === c.k) return
+	if (!autoCubes.record) { // replay the final choice once, recording which cube took each pixel
+		let rec = {}
+		selectCellsByRay(autoCubes, autoCal.an, Object.assign({}, autoCubes.selOpts || {}, { record: rec }))
+		autoCubes.record = rec
+	}
+	probe.info = explainCell(autoCubes, autoCal.an, autoCubes.record, c.i, c.j, c.k)
+	probe.tint = null
+}
+
+/** Copies the probe cell and everything the cell rule saw on it, as text to paste to Claude: enough to recompute that exact cell (photo, camera, lattice origin) */
+function copyProbe() {
+	if (!probe || !probe.info || !autoCubes) return
+	let I = probe.info, A = autoCubes, r = (x, d) => +x.toFixed(d)
+	let L = [
+		'autominer probe cube — photo ' + calibration_photo.value + ', cell (' + I.i + ', ' + I.j + ', ' + I.k + '), distance ' + r(I.z, 2),
+		'outcome: ' + (I.taken ? 'taken' : 'rejected (' + I.reason + ')') + '; among the cubes found: ' + (A.cubes.some((q) => q.i === I.i && q.j === I.j && q.k === I.k) ? 'yes' : 'no'),
+		...I.checks.map((q) => (q.ok ? '  OK ' : '  NO ') + q.name + ': ' + q.value + ' (needs ' + q.need + ')'),
+		'covered by: ' + (I.coveredBy.length ? I.coveredBy.map((q) => '(' + q.key + ') ' + q.n + ' px').join(', ') : 'none'),
+		'silhouette px: free purple ' + I.pix.free.length + ', free not purple ' + I.pix.freeNotPurple.length + ', covered ' + I.pix.covered.length,
+		'camera: pitch ' + r(A.pitch, 3) + ', yaw ' + r(A.yaw, 3) + ', fov ' + r(A.fov, 3) + ', origin [' + A.origin.map((x) => r(x, 4)).join(', ') + ']; texture threshold ' + (A.selOpts && A.selOpts.minNcc !== undefined ? r(A.selOpts.minNcc, 3) : '-') + '; cubes found ' + A.cubes.length + (A.truthScore ? '; synthetic scene: found ' + Math.round(100 * A.truthScore.recall) + '%, right ' + Math.round(100 * A.truthScore.precision) + '%' : ''),
+	]
+	let tx = A.selOpts && A.selOpts.tex, texWhat = !tx ? 'none' : tx.learned === -1 ? 'from the previous photo' : tx.learned ? 'learned from this photo (' + tx.learned + ' faces)' : 'the project one'
+	L.push('diagnostics: lines ' + autoLines.segs.length + ', mask pixels ' + autoCal.an.data.reduce((s, x) => s + x, 0) + ', camera of step 4 [' + [autoCal.pitch, autoCal.yaw, autoCal.fov].map((x) => r(x, 3)).join(', ') + '], texture ' + texWhat + ', browser ' + ((navigator.userAgent.match(new RegExp('(Chrome|Firefox|Edg|Safari)/[0-9.]+')) || ['?'])[0]))
+	let rb = canvasReadbackCheck(calibrationImage)
+	L.push('pixel readback: ' + (rb.altered ? 'ALTERED (' + rb.altered + ' px of 4096 in the test pattern)' : 'exact') + ', photo fingerprint ' + rb.photo)
+	L.push('manual edits on this photo: ' + manualEdits.length + '; this cell: ' + manualStateText(I))
+	copyText(L.join(String.fromCharCode(10)), 'Cell (' + I.i + ', ' + I.j + ', ' + I.k + ') copied to the clipboard')
+}
+
+/** Copies text to the clipboard: the clipboard API, else the old textarea route (file://, permissions), else the console */
+function copyText(text, doneMsg, onFail) {
+	navigator.clipboard.writeText(text).then(() => flashStageMessage(doneMsg)).catch(() => {
+		let ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select()
+		let ok = false; try { ok = document.execCommand('copy') } catch (e) {}
+		ta.remove()
+		if (ok) flashStageMessage(doneMsg)
+		else if (onFail) onFail()
+		else { flashStageMessage('Copy failed: the text is in the console (F12)'); console.log(text) }
+	})
+}
+
+/** Whether the probe cell is in the final result, and whether by the automatic choice or by hand */
+function manualStateText(I) {
+	let inFinal = finalCubes().cubes.some((q) => q.i === I.i && q.j === I.j && q.k === I.k), inAuto = autoCubes.cubes.some((q) => q.i === I.i && q.j === I.j && q.k === I.k)
+	return inFinal === inAuto ? (inFinal ? 'in the result (automatic choice)' : 'not in the result (automatic choice)') : inFinal ? 'ADDED by hand' : 'REMOVED by hand'
+}
+
+/** The probe part of the stats panel */
+function probeHtml() {
+	if (autoCalState !== 'done' || !autoCubes) return ''
+	let html = '<br><br><b style="color:#22ff88">Probe cube</b>: '
+	if (!probe) return html + 'click the photo to place it<br><span style=\"color:#aaa\">without a probe cube: wheel = zoom, drag = pan, 0 = whole view</span>'
+	let I = probe.info, inRes = autoCubes.cubes.some((q) => q.i === I.i && q.j === I.j && q.k === I.k)
+	html += 'cell (' + I.i + ', ' + I.j + ', ' + I.k + '), ' + I.z.toFixed(1) + ' blocks from the camera' + (probe.frozen ? ' <i>(frozen: click to release)</i>' : '')
+	html += '<br><span style="color:#aaa">wheel up = farther, down = nearer; click = freeze/release; Esc = remove</span>'
+	html += '<br><button onclick="toggleProbeCube()" style="margin-top:4px;">Add / remove this cube (x key)</button> <button onclick="copyProbe()" style="margin-top:4px;">Copy for Claude (c key)</button>'
+	html += '<br>Decision: <b>' + manualStateText(I) + '</b>'
+	html += '<br><b style="color:' + (I.taken ? '#4ade80' : '#f87171') + '">' + (I.taken ? 'WOULD BE TAKEN' : 'REJECTED: ' + I.reason) + '</b>' + (inRes ? ' (it is among the cubes found)' : '')
+	if (inRes !== I.taken) html += '<br><span style="color:#facc15">warning: the replay does not match the result shown</span>'
+	for (let q of I.checks) html += '<div style="margin-top:3px;"><b style="color:' + (q.ok ? '#4ade80' : '#f87171') + '">' + (q.ok ? '✓' : '✗') + '</b> ' + q.name + ': <b>' + q.value + '</b> <span style="color:#aaa">(needs ' + q.need + ')</span></div>'
+	if (I.coveredBy.length) html += '<div style="margin-top:3px;">Covered by: ' + I.coveredBy.slice(0, 6).map((q) => '(' + q.key + ') ' + q.n + ' px').join(', ') + (I.coveredBy.length > 6 ? '…' : '') + '</div>'
+	html += '<br><span style="color:#aaa">Silhouette: green = free and purple, red = free but not purple, grey = covered by nearer cubes. Cubes are chosen nearest first; px = mask pixels (' + autoCal.an.w + ' px wide).</span>'
+	return html
 }
 
 /** Redraws the photo + the automatic overlay and refreshes the stats panel */
@@ -420,26 +653,37 @@ function redrawCalibrationCanvas() {
 function updateCalibrationStats() {
 	let html = ''
 	// the steps in the order they run
-	const PHASES = { mask: 'maschera viola', lines: 'linee dai contorni della maschera', refine: 'rifinitura delle linee sul colore', camera: 'stima camera dalle linee', texture: 'texture della foto dai cubi sicuri', lattice: 'cubi e reticolo dalle linee', cells: 'scelta delle celle' }
+	const PHASES = { mask: 'purple mask', lines: 'lines from the mask outlines', refine: 'line refinement on the colour photo', camera: 'camera from the lines', texture: 'photo texture from the sure cubes', lattice: 'cubes and lattice from the lines', cells: 'cell choice' }
 	const ORDER = ['mask', 'lines', 'refine', 'camera', 'texture', 'lattice', 'cells']
 	let cam = autoLive && autoLive.pitch !== undefined ? autoLive : autoCal
 	if (autoCalState === 'running' && autoLive) {
 		let n = ORDER.indexOf(autoLive.phase)
-		html += '<br><br><b style="color:#facc15">In corso: ' + (n >= 0 ? (n + 1) + '/' + ORDER.length + ' ' : '') + (PHASES[autoLive.phase] || autoLive.phase) + '</b>'
+		html += '<br><br><b style="color:#facc15">Running: ' + (n >= 0 ? (n + 1) + '/' + ORDER.length + ' ' : '') + (PHASES[autoLive.phase] || autoLive.phase) + '</b>'
 	}
-	if (cam) html += '<br>' + (autoCalState === 'running' ? '' : '<br>') + '<b style="color:#facc15">Auto:</b> pitch ' + cam.pitch.toFixed(1) + '&deg; gi&ugrave;, yaw ' + cam.yaw.toFixed(1) + '&deg;, FOV vert ' + cam.fov.toFixed(1) + '&deg;'
+	if (autoCalState === 'done' && calibrationImage && calibrationImage.naturalWidth) {
+		if (!calibrationImage.readback) calibrationImage.readback = canvasReadbackCheck(calibrationImage)
+		let rb = calibrationImage.readback
+		html += '<br><span style=\"color:' + (rb.altered ? '#f87171' : '#888') + '\">Pixel readback: ' + (rb.altered ? '<b>ALTERED</b> by the browser (' + rb.altered + ' px of 4096 in the test pattern): extensions or anti-tracking protection falsify the results' : 'exact') + ' · photo fingerprint ' + rb.photo + '</span>'
+	}
+	if (cam) html += '<br>' + (autoCalState === 'running' ? '' : '<br>') + '<b style="color:#facc15">Auto:</b> pitch ' + cam.pitch.toFixed(1) + '&deg; down, yaw ' + cam.yaw.toFixed(1) + '&deg;, FOV vert ' + cam.fov.toFixed(1) + '&deg;'
 	if (autoLines) {
 		let n = autoLines.segs.length, ok = autoLines.segs.filter((L) => L.axis >= 0), tot = autoLines.segs.reduce((a, L) => a + L.len, 0)
-		html += '<br>Linee dai contorni: <b>' + n + '</b>' + (autoLines.segs[0] && autoLines.segs[0].axis !== undefined ? ', ' + ok.length + ' compatibili con la camera stimata (' + (100 * ok.reduce((a, L) => a + L.len, 0) / Math.max(1, tot)).toFixed(0) + '% della lunghezza; rosso/verde/blu = asse X/Y/Z, grigio = nessuno)' : '')
+		html += '<br>Outline lines: <b>' + n + '</b>' + (autoLines.segs[0] && autoLines.segs[0].axis !== undefined ? ', ' + ok.length + ' agree with the estimated camera (' + (100 * ok.reduce((a, L) => a + L.len, 0) / Math.max(1, tot)).toFixed(0) + '% of the length; red/green/blue = X/Y/Z axis, grey = none)' : '')
 	}
-	if (autoTruth) html += '<br><br><b style="color:#60a5fa">Scena sintetica</b>: ' + autoTruth.cubes.length + ' cubi veri, pitch ' + autoTruth.pitch.toFixed(1) + '&deg;, yaw ' + autoTruth.yaw.toFixed(1) + '&deg;, FOV ' + autoTruth.fov.toFixed(1) + '&deg;'
+	if (autoTruth) html += '<br><br><b style="color:#60a5fa">Synthetic scene</b>: ' + autoTruth.cubes.length + ' true cubes, pitch ' + autoTruth.pitch.toFixed(1) + '&deg;, yaw ' + autoTruth.yaw.toFixed(1) + '&deg;, FOV ' + autoTruth.fov.toFixed(1) + '&deg;'
 	if (autoCubes && autoCubes.truthScore) {
 		let t = autoCubes.truthScore, good = t.recall >= 0.95 && t.precision >= 0.95
-		html += '<br><b style="color:' + (good ? '#4ade80' : '#f87171') + '">Trovati ' + Math.round(t.recall * 100) + '% dei cubi veri, giusti ' + Math.round(t.precision * 100) + '% dei trovati</b><br>Errore camera: FOV ' + t.dFov.toFixed(2) + '&deg;, pitch ' + t.dPitch.toFixed(2) + '&deg;, yaw ' + t.dYaw.toFixed(2) + '&deg;'
+		html += '<br><b style="color:' + (good ? '#4ade80' : '#f87171') + '">Found ' + Math.round(t.recall * 100) + '% of the true cubes, ' + Math.round(t.precision * 100) + '% of those found are right</b><br>Camera error: FOV ' + t.dFov.toFixed(2) + '&deg;, pitch ' + t.dPitch.toFixed(2) + '&deg;, yaw ' + t.dYaw.toFixed(2) + '&deg;'
 	}
 	if (autoCubes) {
-		html += '<br><b>' + autoCubes.cubes.length + ' cubi</b> agganciati al reticolo' + (autoCubes.score !== undefined ? ' (punteggio ' + Math.round(autoCubes.score) + ')' : '') + (autoCubes.refIoU ? ', cubo di riferimento IoU ' + autoCubes.refIoU.toFixed(2) : '') + ' - coord. relative al riferimento (0,0,0)'
-	} else if (autoCalState === 'done') html += '<br><span style="color:#f87171">meno di 2 cubi leggibili dalle righe: niente a cui agganciare il reticolo (o troppo poco viola)</span>'
+		html += '<br><b>' + autoCubes.cubes.length + ' cubes</b> snapped to the lattice' + (autoCubes.score !== undefined ? ' (score ' + Math.round(autoCubes.score) + ')' : '') + (autoCubes.refIoU ? ', reference cube IoU ' + autoCubes.refIoU.toFixed(2) : '') + ' - coordinates relative to the reference (0,0,0)'
+		if (autoCalState === 'done') {
+			let fc = finalCubes(), added = fc.cubes.filter((c) => c.manual).length
+			html += '<br>Manual edits: <b>+' + added + ' / -' + fc.removed.length + '</b> &rarr; <b>' + fc.cubes.length + ' cubes</b> used by stages 2-7 (cyan = added, dashed = removed)'
+			if (added || fc.removed.length) html += ' <button onclick="clearManualEdits()">Undo edits</button>'
+		}
+	} else if (autoCalState === 'done') html += '<br><span style="color:#f87171">fewer than 2 cubes readable from the lines: nothing to anchor the lattice to (or too little purple)</span>'
+	html += probeHtml()
 	calibration_stats.innerHTML = html
 }
 
@@ -451,6 +695,48 @@ function setupCalibrationCanvas() {
 	for (let el of [calibration_show_grid, calibration_show_cubes, calibration_show_labels, calibration_show_mask, calibration_show_diff, calibration_show_lines]) el.addEventListener('change', redrawCalibrationCanvas)
 	calibration_photo.addEventListener('change', () => { loadCalibrationPhoto(calibration_photo.value) })
 	calibration_recompute.addEventListener('click', () => { autoCalState = 'idle'; renderCalibrationStage() })
+	const mouseAt = (e) => { let r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) * canvas.width / r.width, (e.clientY - r.top) * canvas.height / r.height] }
+	let pending = false
+	const redrawSoon = () => { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; redrawCalibrationCanvas() }) }
+	canvas.addEventListener('mousedown', (e) => { if (e.button === 0) { photoZoom.down = { x: e.clientX, y: e.clientY, tx: photoZoom.tx, ty: photoZoom.ty }; photoZoom.dragged = false } })
+	window.addEventListener('mousemove', (e) => { // drag = pan, only when zoomed in
+		let d = photoZoom.down
+		if (!d || photoZoom.s === 1) return
+		if (!photoZoom.dragged && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) return
+		photoZoom.dragged = true
+		photoZoom.tx = d.tx + e.clientX - d.x; photoZoom.ty = d.ty + e.clientY - d.y
+		applyPhotoZoom()
+	})
+	window.addEventListener('mouseup', () => { photoZoom.down = null })
+	canvas.addEventListener('click', (e) => {
+		if (photoZoom.dragged) { photoZoom.dragged = false; return } // the end of a pan, not a click
+		if (autoCalState !== 'done' || !autoCubes || !autoCubes.cubes.length) return
+		let [mx, my] = mouseAt(e)
+		if (!probe) { let zs = autoCubes.cubes.map((c) => c.P[2]).sort((a, b) => a - b); placeProbe(mx, my, zs[zs.length >> 1]) } // first click: at the median depth of the cubes found
+		else if (probe.frozen) { probe.frozen = false; placeProbe(mx, my, probe.cells[probe.idx].z) }
+		else probe.frozen = true
+		redrawSoon()
+	})
+	canvas.addEventListener('mousemove', (e) => {
+		if (!probe || probe.frozen || !autoCubes || photoZoom.dragged) return
+		let [mx, my] = mouseAt(e)
+		placeProbe(mx, my, probe.cells[probe.idx].z) // same depth, new ray
+		redrawSoon()
+	})
+	canvas.addEventListener('wheel', (e) => {
+		if (!probe || !autoCubes) { // no probe cube: the wheel zooms on the point under the mouse
+			e.preventDefault()
+			let r = calibration_zoom_box.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, s0 = photoZoom.s
+			photoZoom.s = Math.max(1, Math.min(12, s0 * (e.deltaY < 0 ? 1.2 : 1 / 1.2)))
+			photoZoom.tx = mx - (mx - photoZoom.tx) * photoZoom.s / s0; photoZoom.ty = my - (my - photoZoom.ty) * photoZoom.s / s0
+			applyPhotoZoom()
+			return
+		}
+		e.preventDefault()
+		probe.idx = Math.max(0, Math.min(probe.cells.length - 1, probe.idx + (e.deltaY < 0 ? 1 : -1))) // wheel up = farther along the ray
+		updateProbeInfo()
+		redrawSoon()
+	}, { passive: false })
 }
 
 /** Renders one stage of the pipeline (1-7; stage 1 is the photo/line-detection view, see above) from the already computed snapshots */
@@ -538,9 +824,9 @@ function renderStage(stage) {
 	}
 
 	if (stage_info) {
-		let label = 'Stage ' + stage + '/' + LAST_STAGE + ' - ' + STAGE_NAMES[stage] + ' (tasti 1-' + LAST_STAGE + ' per cambiare)'
-		if (layerView.enabled) label += ' | Layer ' + layerView.y + ' [' + occupied.min + '-' + occupied.max + '] (freccie su/giù, \'l\' per uscire)'
-		else label += " ('l' per vista a livelli)"
+		let label = 'Stage ' + stage + '/' + LAST_STAGE + ' - ' + STAGE_NAMES[stage] + ' - vein: ' + (pipeline.source ? 'photo ' + pipeline.source : 'random (r)') + ' (keys 1-' + LAST_STAGE + ' to switch)'
+		if (layerView.enabled) label += ' | Layer ' + layerView.y + ' [' + occupied.min + '-' + occupied.max + '] (up/down arrows, \'l\' to exit)'
+		else label += " ('l' for the layer view)"
 		stage_info.innerHTML = label
 	}
 }
@@ -607,7 +893,7 @@ function setupSettingsMenu() {
 			try {
 				parsed = veinFromExport(JSON.parse(json))
 			} catch (e) {
-				flashStageMessage('JSON non valido: ' + e.message)
+				flashStageMessage('Invalid JSON: ' + e.message)
 				return
 			}
 			processVein(parsed.vein, parsed.seed)
@@ -650,6 +936,10 @@ document.addEventListener('keydown', (event) => {
 	if (event.key === 'm') {
 		settings_menu.style.display = (settings_menu.style.display == 'none') ? 'block' : 'none';
 	}
+	if (event.key === 'Escape' && probe) { probe = null; if (currentStage === 1) redrawCalibrationCanvas() }
+	if (event.key === 'c' && probe && currentStage === 1) copyProbe()
+	if (event.key === 'x' && probe && currentStage === 1) toggleProbeCube()
+	if (event.key === '0' && currentStage === 1) resetPhotoZoom()
 	if (['1','2','3','4','5','6','7'].includes(event.key)) {
 		renderStage(parseInt(event.key))
 	}

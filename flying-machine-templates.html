@@ -119,41 +119,41 @@ button.action:disabled{opacity:.45; cursor:default}
 <div class="wrap">
   <header>
     <div class="title-row">
-      <span class="eyebrow">Autominer &middot; ricerca componenti</span>
+      <span class="eyebrow">Autominer &middot; component research</span>
     </div>
-    <h1>Template flying machine</h1>
-    <p class="sub">Due meccanismi per spingere e ritirare i blocchi di slime/honey del sistema di scavo: il pistone singolo (probabilmente sufficiente per il nostro caso) e la macchina del mod Geodesy, da cui è nato il progetto &mdash; qui ricostruita blocco per blocco dal suo codice sorgente. Ruota, zooma ed entra nella scena per ispezionarle da dentro.</p>
-    <div class="tabs" role="tablist" aria-label="Template">
-      <button class="tab" id="tab-single" role="tab" aria-selected="true">01 &middot; Pistone singolo</button>
-      <button class="tab" id="tab-engine" role="tab" aria-selected="false">02 &middot; Macchina Geodesy</button>
+    <h1>Flying machine templates</h1>
+    <p class="sub">Two mechanisms for pushing and retracting the slime/honey blocks of the mining system: the single piston (probably enough for our case) and the machine from the Geodesy mod, which the project grew out of &mdash; rebuilt here block by block from its source code. Rotate, zoom and move into the scene to inspect them from inside.</p>
+    <div class="tabs" role="tablist" aria-label="Templates">
+      <button class="tab" id="tab-single" role="tab" aria-selected="true">01 &middot; Single piston</button>
+      <button class="tab" id="tab-engine" role="tab" aria-selected="false">02 &middot; Geodesy machine</button>
     </div>
   </header>
 
   <main>
     <section class="viewport-card">
       <div class="viewport-head">
-        <h2 id="stage-title">Pistone appiccicoso + catena slime</h2>
-        <span class="hint">trascina per ruotare &middot; rotella per zoom</span>
+        <h2 id="stage-title">Sticky piston + slime chain</h2>
+        <span class="hint">drag to rotate &middot; scroll to zoom</span>
       </div>
       <div id="stage-wrap"><canvas id="stage"></canvas></div>
       <div class="ctrl-row" id="ctrl-single">
-        <button class="action" id="btn-push">Spingi</button>
-        <button class="action" id="btn-pull">Ritira</button>
-        <span class="state-label">stato: <b id="state-single">a riposo</b></span>
+        <button class="action" id="btn-push">Push</button>
+        <button class="action" id="btn-pull">Retract</button>
+        <span class="state-label">state: <b id="state-single">retracted</b></span>
       </div>
       <div class="ctrl-row" id="ctrl-engine" hidden>
-        <span class="hint">struttura lineare, 9 blocchi &times; 3 di larghezza &times; 1 di spessore &mdash; oscilla tra i due blocchi di ostruzione (obsidian) alle estremità</span>
+        <span class="hint">linear structure, 9 blocks &times; 3 wide &times; 1 thick &mdash; shuttles between the two blocker blocks (obsidian) at the ends</span>
       </div>
     </section>
 
     <aside class="panel">
       <div class="card" id="legend-card">
-        <h3>Legenda blocchi</h3>
+        <h3>Block legend</h3>
         <ul class="legend" id="legend-list"></ul>
       </div>
 
       <div class="card" id="desc-card">
-        <h3>Come funziona</h3>
+        <h3>How it works</h3>
         <div id="desc-body"></div>
       </div>
 
@@ -161,7 +161,7 @@ button.action:disabled{opacity:.45; cursor:default}
     </aside>
   </main>
 
-  <p class="foot">ricostruzioni didattiche &middot; verifica sempre in gioco prima di fidartene per una build reale</p>
+  <p class="foot">educational reconstructions &middot; always verify in game before relying on them for a real build</p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/build/three.min.js"></script>
@@ -173,31 +173,31 @@ button.action:disabled{opacity:.45; cursor:default}
   // ---------- content ----------
   var LEGEND = {
     single: [
-      {color:'var(--piston-body)', border:'var(--sticky-tip)', name:'Pistone appiccicoso', role:'spinge E tira (vedi nota sotto)'},
-      {color:'var(--slime)', name:'Blocco di slime', role:'si attacca a slime/honey adiacenti, si muove con loro'}
+      {color:'var(--piston-body)', border:'var(--sticky-tip)', name:'Sticky piston', role:'pushes AND pulls (see note below)'},
+      {color:'var(--slime)', name:'Slime block', role:'sticks to adjacent slime/honey, moves with them'}
     ],
     engine: [
-      {color:'var(--piston-body)', border:'var(--sticky-tip)', name:'Pistone appiccicoso', role:'spinge in una direzione, tira nell\'altra'},
-      {color:'var(--slime)', name:'Blocco di slime/honey', role:'collega i pistoni in catena'},
-      {color:'var(--observer)', name:'Observer', role:'rileva il movimento sulla faccia indicata, invia un impulso'},
-      {color:'var(--lamp)', name:'Redstone lamp', role:'indicatore visivo, non essenziale al meccanismo'},
-      {color:'var(--note)', name:'Note block', role:'segnale sonoro di stato, non essenziale al meccanismo'},
-      {color:'var(--obsidian)', name:'Obsidian', role:'ostruzione alle due estremità: la macchina ci sbatte contro e torna indietro'}
+      {color:'var(--piston-body)', border:'var(--sticky-tip)', name:'Sticky piston', role:'pushes in one direction, pulls in the other'},
+      {color:'var(--slime)', name:'Slime/honey block', role:'links the pistons into a chain'},
+      {color:'var(--observer)', name:'Observer', role:'detects movement on the marked face, sends a pulse'},
+      {color:'var(--lamp)', name:'Redstone lamp', role:'visual indicator, not essential to the mechanism'},
+      {color:'var(--note)', name:'Note block', role:'audible status signal, not essential to the mechanism'},
+      {color:'var(--obsidian)', name:'Obsidian', role:'blocker at both ends: the machine bumps into it and turns back'}
     ]
   };
 
   var DESC = {
-    single: '<div class="desc">Un <b>pistone appiccicoso</b> spinge l\'intera catena di blocchi slime/honey collegati davanti a sé (fino a 12 blocchi).</div>' +
-      '<div class="desc">Al rilascio, <b>tira indietro l\'intera catena collegata</b> tramite slime/honey &mdash; non solo il blocco a contatto diretto. Fonte: wiki ufficiale, pagina Sticky Piston: "pulls the block attached to its head and any blocks attached to the head via slime- or honey blocks".</div>' +
-      '<div class="desc">Questo significa che per i nostri gruppi (&le;12 blocchi, già collegati) potrebbe bastare <b>un solo pistone appiccicoso</b> per gestire spinta e ritorno, senza una vera flying machine.</div>',
-    engine: '<div class="desc">La macchina usata dal mod <b>Geodesy</b> (da cui è nato questo progetto) per spingere ogni isola di slime/honey contro il geode. È una struttura <b>lineare</b> (9 blocchi di lunghezza &times; 3 di larghezza &times; 1 di spessore), non ad L &mdash; la forma a L richiesta dal solver riguarda l\'<b>isola</b> da spingere, non l\'ingranaggio che la spinge.</div>' +
-      '<div class="desc">Due coppie pistone+observer si attivano a vicenda in sequenza lungo la struttura, facendola "camminare" avanti e indietro tra i due blocchi di <b>obsidian</b> alle estremità, che fermano la macchina e la fanno tornare &mdash; è il sistema di ritorno di cui parlavamo.</div>' +
-      '<div class="desc">Redstone lamp e note block sono solo indicatori di stato (si accendono/suonano quando la macchina passa), non servono al meccanismo di base.</div>',
+    single: '<div class="desc">A <b>sticky piston</b> pushes the entire chain of connected slime/honey blocks in front of it (up to 12 blocks).</div>' +
+      '<div class="desc">On release, it <b>pulls back the entire connected chain</b> through the slime/honey &mdash; not just the block in direct contact. Source: official wiki, Sticky Piston page: "pulls the block attached to its head and any blocks attached to the head via slime- or honey blocks".</div>' +
+      '<div class="desc">This means that for our groups (&le;12 blocks, already connected) <b>a single sticky piston</b> may be enough to handle both push and return, without a real flying machine.</div>',
+    engine: '<div class="desc">The machine used by the <b>Geodesy</b> mod (which this project grew out of) to push each slime/honey island against the geode. It is a <b>linear</b> structure (9 blocks long &times; 3 wide &times; 1 thick), not L-shaped &mdash; the L shape required by the solver applies to the <b>island</b> being pushed, not to the contraption that pushes it.</div>' +
+      '<div class="desc">Two piston+observer pairs trigger each other in sequence along the structure, making it "walk" back and forth between the two <b>obsidian</b> blocks at the ends, which stop the machine and send it back &mdash; this is the return system we were talking about.</div>' +
+      '<div class="desc">The redstone lamp and note block are only status indicators (they light up/play a sound when the machine passes by); the basic mechanism does not need them.</div>',
   };
 
   var NOTE = {
-    single: 'Meccanica verificata sulla documentazione ufficiale (minecraft.wiki/w/Sticky_Piston). Dimensioni e materiali qui sono semplificati per la dimostrazione.',
-    engine: 'Verificato riga per riga sul codice sorgente del mod: <a href="https://github.com/kosmolot-mods/geodesy/blob/main/src/main/java/pl/kosma/geodesy/GeodesyCore.java" target="_blank" rel="noopener">GeodesyCore.java, metodo buildMachine()</a>. Non una ricostruzione approssimativa.'
+    single: 'Mechanics verified against the official documentation (minecraft.wiki/w/Sticky_Piston). Sizes and materials here are simplified for the demo.',
+    engine: 'Verified line by line against the mod source code: <a href="https://github.com/kosmolot-mods/geodesy/blob/main/src/main/java/pl/kosma/geodesy/GeodesyCore.java" target="_blank" rel="noopener">GeodesyCore.java, buildMachine() method</a>. Not a rough approximation.'
   };
 
   function renderLegend(which){
@@ -329,7 +329,7 @@ button.action:disabled{opacity:.45; cursor:default}
     updateSingleLabel();
   }
   function updateSingleLabel(){
-    document.getElementById('state-single').textContent = singleState.pushed ? 'esteso' : 'a riposo';
+    document.getElementById('state-single').textContent = singleState.pushed ? 'extended' : 'retracted';
     document.getElementById('btn-push').disabled = singleState.pushed;
     document.getElementById('btn-pull').disabled = !singleState.pushed;
   }
@@ -434,9 +434,9 @@ button.action:disabled{opacity:.45; cursor:default}
     tabEngine.setAttribute('aria-selected', String(!isSingle));
     ctrlSingle.hidden = !isSingle;
     ctrlEngine.hidden = isSingle;
-    stageTitle.textContent = isSingle ? 'Pistone appiccicoso + catena slime' : 'Macchina del mod Geodesy (19 blocchi)';
+    stageTitle.textContent = isSingle ? 'Sticky piston + slime chain' : 'Geodesy mod machine (19 blocks)';
     descBody.innerHTML = isSingle ? DESC.single : DESC.engine;
-    accNote.innerHTML = '<b>Precisione:</b> ' + (isSingle ? NOTE.single : NOTE.engine);
+    accNote.innerHTML = '<b>Accuracy:</b> ' + (isSingle ? NOTE.single : NOTE.engine);
     renderLegend(which);
     if (isSingle) buildSingleTemplate(); else buildEngineTemplate();
   }

@@ -35,54 +35,54 @@
     <!-- stage 1 only: photo + detected lines, in place of the 3D scene -->
     <div id="calibration_view" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:5; background:black; overflow:auto;">
       <div style="display:flex; align-items:flex-start; gap:10px;">
-      <canvas id="calibration_canvas" style="max-width:calc(100% - 320px); display:block;"></canvas>
+      <div id="calibration_zoom_box" style="max-width:calc(100% - 320px); overflow:hidden; flex:0 1 auto;"><canvas id="calibration_canvas" style="max-width:100%; display:block; transform-origin:0 0;"></canvas></div>
       <div id="calibration_panel" style="flex:0 0 300px; box-sizing:border-box; margin-top:10px; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:12px; padding:10px; border-radius:6px;">
-        <label style="display:block; margin-bottom:8px; font-weight:bold;">Foto: <select id="calibration_photo" autocomplete="off"><option value="geode01">geode-01</option><option value="geode02">geode-02</option><option value="geode03">geode-03</option></select></label>
+        <label style="display:block; margin-bottom:8px; font-weight:bold;">Photo: <select id="calibration_photo" autocomplete="off"><option value="geode01">geode-01</option><option value="geode02">geode-02</option><option value="geode03">geode-03</option><option value="geode04">geode-04</option><option value="geode05">geode-05</option><option value="geode06">geode-06</option></select></label>
         <div id="calibration_stats" style="margin-top:8px;"></div>
-        <div style="margin-top:12px; padding-top:8px; border-top:1px solid #555; font-weight:bold;">Calibrazione automatica</div>
-        <div>Camera (pitch/yaw/FOV) stimata dai bordi dei blocchi di ametista, senza input manuale; poi i cubi sono agganciati a un reticolo 3D.</div>
-        <label style="display:block; margin-top:6px;"><input type="checkbox" id="calibration_show_grid" checked> Griglia 3D (piano sotto i cubi)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_cubes" checked> Cubi rilevati</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_lines" checked> Linee dai contorni (colore = asse)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_labels"> Coordinate dei cubi</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_diff"> Differenze cubi/maschera (rosso = coperto non viola, blu = viola non coperto)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_mask"> Maschera viola (sempre visibile mentre calcola)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_slow"> Rallenta (passo per passo)</label>
-        <label style="display:block; margin-top:6px;">FOV verticale noto (vuoto = auto): <input type="number" id="calibration_fov" min="20" max="160" style="width:60px;"></label>
-        <button id="calibration_recompute" style="margin-top:6px; width:100%;">Ricalcola auto</button>
+        <div style="margin-top:12px; padding-top:8px; border-top:1px solid #555; font-weight:bold;">Automatic calibration</div>
+        <div>Camera (pitch/yaw/FOV) estimated from the edges of the amethyst blocks, with no manual input; then the cubes are snapped to a 3D lattice.</div>
+        <label style="display:block; margin-top:6px;"><input type="checkbox" id="calibration_show_grid" checked> 3D grid (floor under the cubes)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_cubes" checked> Detected cubes</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_lines" checked> Outline lines (colour = axis)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_labels"> Cube coordinates</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_diff"> Cubes vs mask (red = covered but not purple, blue = purple but not covered)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_show_mask"> Purple mask (always shown while computing)</label>
+        <label style="display:block;"><input type="checkbox" id="calibration_slow"> Slow down (step by step)</label>
+        <label style="display:block; margin-top:6px;">Known vertical FOV (empty = auto): <input type="number" id="calibration_fov" min="20" max="160" style="width:60px;"></label>
+        <button id="calibration_recompute" style="margin-top:6px; width:100%;">Recompute</button>
       </div>
       </div>
     </div>
 
     <div id="settings_menu" style="position:absolute; z-index:20; left:10px; top:170px; width:270px; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:13px; padding:10px; border-radius:6px;">
-      <div style="font-weight:bold; margin-bottom:8px;">Impostazioni generazione (tasto 'm')</div>
+      <div style="font-weight:bold; margin-bottom:8px;">Generation settings ('m' key)</div>
 
-      <label>Densità ore: <span id="density_val"></span></label><br>
+      <label>Ore density: <span id="density_val"></span></label><br>
       <input type="range" id="density_slider" min="0.01" max="0.3" step="0.01" style="width:100%"><br>
 
-      <label>Range (spessore guscio): <span id="range_val"></span></label><br>
+      <label>Range (shell thickness): <span id="range_val"></span></label><br>
       <input type="range" id="range_slider" min="0.5" max="5" step="0.1" style="width:100%"><br>
 
-      <label>Distanza macchine dal geoide: <span id="gap_val"></span></label><br>
+      <label>Machine distance from the geode: <span id="gap_val"></span></label><br>
       <input type="range" id="gap_slider" min="0" max="6" step="1" style="width:100%"><br>
 
-      <label>Preferenza slime/honey: <span id="slime_pref_val"></span></label><br>
+      <label>Slime/honey preference: <span id="slime_pref_val"></span></label><br>
       <input type="range" id="slime_pref_slider" min="0" max="100" step="1" style="width:100%"><br>
 
       <div style="margin-top:8px;">
-        <label><input type="checkbox" id="invert_x"> Inverti asse X</label><br>
-        <label><input type="checkbox" id="invert_y"> Inverti asse Y</label><br>
-        <label><input type="checkbox" id="invert_z"> Inverti asse Z</label>
+        <label><input type="checkbox" id="invert_x"> Invert X axis</label><br>
+        <label><input type="checkbox" id="invert_y"> Invert Y axis</label><br>
+        <label><input type="checkbox" id="invert_z"> Invert Z axis</label>
       </div>
 
       <div style="margin-top:8px;">
-        <label><input type="checkbox" id="show_x"> Mostra asse X</label><br>
-        <label><input type="checkbox" id="show_y"> Mostra asse Y</label><br>
-        <label><input type="checkbox" id="show_z"> Mostra asse Z</label>
+        <label><input type="checkbox" id="show_x"> Show X axis</label><br>
+        <label><input type="checkbox" id="show_y"> Show Y axis</label><br>
+        <label><input type="checkbox" id="show_z"> Show Z axis</label>
       </div>
 
       <div style="margin-top:8px;">
-        <label>Import JSON ({seed,size,ores} o {seed,vein}):</label><br>
+        <label>Import JSON ({seed,size,ores} or {seed,vein}):</label><br>
         <textarea id="import_json" rows="3" style="width:100%; font-size:11px; box-sizing:border-box;"></textarea>
       </div>
 

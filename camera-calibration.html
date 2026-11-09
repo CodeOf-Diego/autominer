@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Camera calibration prototype</title>
@@ -29,7 +29,7 @@
 <body>
 
 <h1>Camera calibration prototype</h1>
-<p class="sub">Step 1-3: rilevamento linee (Canny + Hough) &rarr; clustering punti di fuga &rarr; focale/FOV/rotazione. Vedi README.md / autominer per il contesto.</p>
+<p class="sub">Steps 1-3: line detection (Canny + Hough) &rarr; vanishing point clustering &rarr; focal length/FOV/rotation. See README.md / autominer for context.</p>
 
 <div class="layout">
 	<div class="canvas-wrap">
@@ -40,27 +40,27 @@
 	<div class="panel">
 		<h2>Input</h2>
 		<input type="file" id="file_input" accept="image/*">
-		<label>Dimensione max elaborazione (px): <span class="val" id="maxdim_val"></span></label>
+		<label>Max processing size (px): <span class="val" id="maxdim_val"></span></label>
 		<input type="range" id="maxdim" min="400" max="3840" value="1200" step="100">
 		<label>Canny threshold 1: <span class="val" id="canny1_val"></span></label>
 		<input type="range" id="canny1" min="10" max="200" value="50">
 		<label>Canny threshold 2: <span class="val" id="canny2_val"></span></label>
 		<input type="range" id="canny2" min="20" max="400" value="150">
-		<label>Hough threshold (voti minimi): <span class="val" id="hough_thresh_val"></span></label>
+		<label>Hough threshold (min votes): <span class="val" id="hough_thresh_val"></span></label>
 		<input type="range" id="hough_thresh" min="10" max="150" value="40">
 		<label>Hough min line length: <span class="val" id="hough_minlen_val"></span></label>
 		<input type="range" id="hough_minlen" min="5" max="200" value="25">
 		<label>Hough max line gap: <span class="val" id="hough_maxgap_val"></span></label>
 		<input type="range" id="hough_maxgap" min="1" max="50" value="8">
-		<button id="run_btn" disabled>Analizza</button>
-		<div class="status" id="status">Caricamento OpenCV.js...</div>
+		<button id="run_btn" disabled>Analyze</button>
+		<div class="status" id="status">Loading OpenCV.js...</div>
 	</div>
 
 	<div class="panel">
-		<h2>Punti di fuga candidati</h2>
-		<table id="vp_table"><thead><tr><th>#</th><th>x,y (px)</th><th>score</th><th>membri</th></tr></thead><tbody></tbody></table>
+		<h2>Candidate vanishing points</h2>
+		<table id="vp_table"><thead><tr><th>#</th><th>x,y (px)</th><th>score</th><th>members</th></tr></thead><tbody></tbody></table>
 
-		<h2 style="margin-top:16px">Calibrazione (dalla miglior coppia ortogonale)</h2>
+		<h2 style="margin-top:16px">Calibration (from the best orthogonal pair)</h2>
 		<div id="calib_result">-</div>
 	</div>
 </div>
@@ -73,7 +73,7 @@ let VP_COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#eab308', '#a855f7', '#06b6d4
 
 function onOpenCvReady() {
 	cvReady = true
-	status('OpenCV.js pronto.')
+	status('OpenCV.js ready.')
 	run_btn.disabled = false
 }
 
@@ -89,7 +89,7 @@ function loadImage(src) {
 		base.height = overlay.height = img.height
 		overlay.style.width = base.style.width = Math.min(img.width, 1100) + 'px'
 		base.getContext('2d').drawImage(img, 0, 0)
-		status('Immagine caricata: ' + img.width + 'x' + img.height)
+		status('Image loaded: ' + img.width + 'x' + img.height)
 	}
 	img.src = src
 }
@@ -248,7 +248,7 @@ function calibrateFromPair(v1, v2, cx, cy) {
 
 function run() {
 	if (!cvReady) return
-	status('Elaborazione...')
+	status('Processing...')
 	let base = document.getElementById('base')
 	let src = cv.imread(base)
 
@@ -291,11 +291,11 @@ function run() {
 	src.delete(); gray.delete(); blurred.delete(); edges.delete(); lines.delete()
 	if (working !== src) working.delete()
 
-	status('Trovati ' + segments.length + ' segmenti. Cerco punti di fuga...')
+	status('Found ' + segments.length + ' segments. Searching for vanishing points...')
 	let clusters = findVanishingPoints(segments, base.width, base.height)
 	renderOverlay(segments, clusters, base.width, base.height)
 	renderResults(clusters, base.width, base.height)
-	status('Fatto: ' + segments.length + ' segmenti, ' + clusters.length + ' cluster candidati.')
+	status('Done: ' + segments.length + ' segments, ' + clusters.length + ' candidate clusters.')
 }
 
 function renderOverlay(segments, clusters, w, h) {
@@ -372,17 +372,17 @@ function renderResults(clusters, w, h) {
 
 	let out = document.getElementById('calib_result')
 	if (!best) {
-		out.innerHTML = '<span style="color:#f87171">Nessuna coppia di VP ortogonale valida trovata.</span>'
+		out.innerHTML = '<span style="color:#f87171">No valid orthogonal VP pair found.</span>'
 		return
 	}
 	let f = best.f
 	let vFOV = 2 * Math.atan((h / 2) / f) * 180 / Math.PI
 	let hFOV = 2 * Math.atan((w / 2) / f) * 180 / Math.PI
 	out.innerHTML =
-		'Coppia usata: VP' + best.i + ' + VP' + best.j + '<br>' +
+		'Pair used: VP' + best.i + ' + VP' + best.j + '<br>' +
 		'<div class="result-big">f = ' + f.toFixed(1) + ' px</div>' +
-		'FOV verticale: <b>' + vFOV.toFixed(1) + '&deg;</b> (Minecraft: 30-110&deg;, default 70&deg;)<br>' +
-		'FOV orizzontale: <b>' + hFOV.toFixed(1) + '&deg;</b>'
+		'Vertical FOV: <b>' + vFOV.toFixed(1) + '&deg;</b> (Minecraft: 30-110&deg;, default 70&deg;)<br>' +
+		'Horizontal FOV: <b>' + hFOV.toFixed(1) + '&deg;</b>'
 }
 
 document.getElementById('run_btn').addEventListener('click', run)
