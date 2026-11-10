@@ -1,6 +1,6 @@
 // Runs the app's stage-1 pipeline on scenes with known truth and prints camera errors, lattice-relative recall/precision and the time.
 // node synth_run.js <seeds> <brightness> [optsJSON]      e.g. node synth_run.js 1,2,3 1 '{"DR":[6,10],"RR":[3.5,5]}' for close-up scenes
-// node synth_run.js photos                               the 3 real photos (no truth: texture correlation of the cells is the judge)
+// node synth_run.js photos [geode07,...]                  the real photos, all by default (no truth: texture correlation of the cells is the judge)
 const H = require('./harness')
 ;(async () => {
   const { b, p } = await H.open()
@@ -8,7 +8,7 @@ const H = require('./harness')
   if (process.env.SYNTH_TEX !== '0') await p.evaluate(async () => { const i = await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.src = TEXTURE_DATA.amethyst_block }); const c = document.createElement('canvas'); c.width = 16; c.height = 16; const g = c.getContext('2d'); g.drawImage(i, 0, 0); window.__tex = g.getImageData(0, 0, 16, 16).data })
   await p.evaluate(() => { window.__timeline = []; const o = runAutoCalibration; window.runAutoCalibration = async function () { const t = performance.now(); await o(); window.__ms = Math.round(performance.now() - t) } })
   if (process.argv[2] === 'photos') {
-    for (const ph of ['geode01', 'geode02', 'geode03']) {
+    for (const ph of (process.argv[3] || 'geode01,geode02,geode03,geode04,geode05,geode06,geode07').split(',')) {
       await H.photo(p, ph)
       console.log(ph, JSON.stringify(await p.evaluate(async () => {
         const A = autoCubes; if (!A) return { fail: true, ms: window.__ms }

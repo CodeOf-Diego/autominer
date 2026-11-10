@@ -1,6 +1,12 @@
-<html>
+<!doctype html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autominer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="app.css">
     <script type="importmap">
 	{
 		"imports": {
@@ -24,69 +30,137 @@
 	<script src="js/PhotoData.js" defer></script>
 	<script src="js/CalibrationTools.js" defer></script>
 	<script src="reference/synthetic/tools/synth_page.js" defer></script>
+	<script src="js/App.js" defer></script>
 	<script src="main.js" defer></script>
-	<!-- stage 1 (photo + detected lines): downloads lazily in the background, a few MB -->
-	<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
+	<!-- stage 1 (photo scan): downloads lazily in the background, a few MB -->
+	<!-- async: when cached it can finish BEFORE the defer scripts run, so onload only sets a flag if CalibrationTools.js isn't there yet -->
+	<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="window.cvScriptLoaded = true; if (window.onOpenCvReady) onOpenCvReady()"></script>
 </head>
-  <body>
-    <span id="debug_info" style="position: absolute;z-index: 10; color: white;font-size: 24px; pointer-events: none;"></span>
-    <span id="stage_info" style="position: absolute;z-index: 10; bottom: 10px; left: 10px; color: white;font-size: 20px; pointer-events: none;"></span>
-
-    <!-- stage 1 only: photo + detected lines, in place of the 3D scene -->
-    <div id="calibration_view" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:5; background:black; overflow:auto;">
-      <div style="display:flex; align-items:flex-start; gap:10px;">
-      <div id="calibration_zoom_box" style="max-width:calc(100% - 320px); overflow:hidden; flex:0 1 auto;"><canvas id="calibration_canvas" style="max-width:100%; display:block; transform-origin:0 0;"></canvas></div>
-      <div id="calibration_panel" style="flex:0 0 300px; box-sizing:border-box; margin-top:10px; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:12px; padding:10px; border-radius:6px;">
-        <label style="display:block; margin-bottom:8px; font-weight:bold;">Photo: <select id="calibration_photo" autocomplete="off"><option value="geode01">geode-01</option><option value="geode02">geode-02</option><option value="geode03">geode-03</option><option value="geode04">geode-04</option><option value="geode05">geode-05</option><option value="geode06">geode-06</option></select></label>
-        <div id="calibration_stats" style="margin-top:8px;"></div>
-        <div style="margin-top:12px; padding-top:8px; border-top:1px solid #555; font-weight:bold;">Automatic calibration</div>
-        <div>Camera (pitch/yaw/FOV) estimated from the edges of the amethyst blocks, with no manual input; then the cubes are snapped to a 3D lattice.</div>
-        <label style="display:block; margin-top:6px;"><input type="checkbox" id="calibration_show_grid" checked> 3D grid (floor under the cubes)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_cubes" checked> Detected cubes</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_lines" checked> Outline lines (colour = axis)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_labels"> Cube coordinates</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_diff"> Cubes vs mask (red = covered but not purple, blue = purple but not covered)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_show_mask"> Purple mask (always shown while computing)</label>
-        <label style="display:block;"><input type="checkbox" id="calibration_slow"> Slow down (step by step)</label>
-        <label style="display:block; margin-top:6px;">Known vertical FOV (empty = auto): <input type="number" id="calibration_fov" min="20" max="160" style="width:60px;"></label>
-        <button id="calibration_recompute" style="margin-top:6px; width:100%;">Recompute</button>
-      </div>
-      </div>
+  <body data-screen="landing" data-debug="0">
+    <!-- the three.js canvas (#scene_canvas) is added by SceneTools; step 1 shows the photo here instead -->
+    <div id="calibration_view">
+      <div id="calibration_zoom_box"><canvas id="calibration_canvas"></canvas></div>
     </div>
 
-    <div id="settings_menu" style="position:absolute; z-index:20; left:10px; top:170px; width:270px; background:rgba(0,0,0,0.78); color:white; font-family:sans-serif; font-size:13px; padding:10px; border-radius:6px;">
-      <div style="font-weight:bold; margin-bottom:8px;">Generation settings ('m' key)</div>
+    <!-- ===================== landing page ===================== -->
+    <section id="landing">
+      <div class="launch glass">
+        <div class="brand">Autominer</div>
+        <h1>Automate your amethyst farm.</h1>
+        <p class="lead">Screenshot a geode in Minecraft and get the flying machines that harvest it, step by step.</p>
 
-      <label>Ore density: <span id="density_val"></span></label><br>
-      <input type="range" id="density_slider" min="0.01" max="0.3" step="0.01" style="width:100%"><br>
+        <button class="opt" data-action="upload">
+          <span class="bub"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3l2-2h6l2 2h3v12H4z M12 9.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z"/></svg></span>
+          <span class="grow"><b>Scan a screenshot</b><small>Click, drop an image here, or paste it (Ctrl+V)</small></span><span class="arr">→</span>
+        </button>
+        <button class="opt teal" data-action="random">
+          <span class="bub"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z M12 12l8-4.5 M12 12v9 M12 12L4 7.5"/></svg></span>
+          <span class="grow"><b>Generate a random geode</b><small>No screenshot? See how it works in a few seconds</small></span><span class="arr">→</span>
+        </button>
+        <details class="saved" id="saved" open>
+          <summary>
+            <span class="bub grey"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h6l2 2h8v11H4z"/></svg></span>
+            <span class="grow"><b>Open a saved geode</b><small id="saved_count"></small></span><span class="arr chev">›</span>
+          </summary>
+          <div id="lib_list"></div>
+        </details>
+        <button id="continue_btn" hidden>↻ Resume <span data-name></span><small data-step></small></button>
+        <div class="foot"><span>Tip: open the debug screen (F3) before taking the screenshot</span><button data-action="settings">Settings</button></div>
+      </div>
+      <div class="drop-hint">Drop the screenshot to scan it</div>
+      <input type="file" id="photo_input" accept="image/*" hidden>
+    </section>
 
-      <label>Range (shell thickness): <span id="range_val"></span></label><br>
-      <input type="range" id="range_slider" min="0.5" max="5" step="0.1" style="width:100%"><br>
-
-      <label>Machine distance from the geode: <span id="gap_val"></span></label><br>
-      <input type="range" id="gap_slider" min="0" max="6" step="1" style="width:100%"><br>
-
-      <label>Slime/honey preference: <span id="slime_pref_val"></span></label><br>
-      <input type="range" id="slime_pref_slider" min="0" max="100" step="1" style="width:100%"><br>
-
-      <div style="margin-top:8px;">
-        <label><input type="checkbox" id="invert_x"> Invert X axis</label><br>
-        <label><input type="checkbox" id="invert_y"> Invert Y axis</label><br>
-        <label><input type="checkbox" id="invert_z"> Invert Z axis</label>
+    <!-- ===================== workspace HUD ===================== -->
+    <section id="workspace">
+      <div class="tl glass">
+        <button class="round" data-action="home" title="All geodes"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <input id="geode_name" spellcheck="false" aria-label="Geode name">
+        <span id="save_status">Saved</span>
+      </div>
+      <div class="tr glass">
+        <button class="round" id="layers_btn" data-action="layers" title="Layer view (L): build one layer at a time"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 5-9 5-9-5z M3 14l9 5 9-5"/></svg></button>
+        <button class="round" data-action="reset-view" title="Reset the view"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.5-5.8 M4 4v4h4"/></svg></button>
+        <button class="round" data-action="settings" title="Settings"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3 M12 18.5v3 M2.5 12h3 M18.5 12h3 M5.3 5.3l2.1 2.1 M16.6 16.6l2.1 2.1 M5.3 18.7l2.1-2.1 M16.6 7.4l2.1-2.1"/></svg></button>
       </div>
 
-      <div style="margin-top:8px;">
-        <label><input type="checkbox" id="show_x"> Show X axis</label><br>
-        <label><input type="checkbox" id="show_y"> Show Y axis</label><br>
-        <label><input type="checkbox" id="show_z"> Show Z axis</label>
+      <div class="leftcol">
+        <div class="card glass" id="step_card">
+          <div class="eyebrow"><span>Step <span id="step_num"></span>/7</span><span class="bar"><i id="step_bar"></i></span><button class="mini" data-action="collapse-card" title="Show less / more">–</button></div>
+          <h2 id="step_short"></h2>
+          <div class="more">
+            <p id="step_desc"></p>
+            <div class="legend" id="step_legend"></div>
+          </div>
+          <div id="scan_status"></div>
+        </div>
+
+        <!-- debug panel: every developer control and diagnostic of the old interface (same ids) -->
+        <div id="debug_panel" class="glass">
+          <div class="dbg-head"><b>DEBUG</b><button data-action="debug-off" title="Turn debug off">✕</button></div>
+          <div id="stage_info" class="dbg-line"></div>
+
+          <div class="dbg-sec">Step 1 · scan</div>
+          <label class="dbg-row">Photo <select id="calibration_photo" autocomplete="off"><option id="entry_photo_option" hidden></option><option value="geode01">geode-01</option><option value="geode02">geode-02</option><option value="geode03">geode-03</option><option value="geode04">geode-04</option><option value="geode05">geode-05</option><option value="geode06">geode-06</option><option value="geode07">geode-07</option></select></label>
+          <label class="dbg-row"><input type="checkbox" id="calibration_show_grid" checked> 3D grid (floor under the cubes)</label>
+          <label class="dbg-row"><input type="checkbox" id="calibration_show_cubes" checked> Detected cubes</label>
+          <label class="dbg-row"><input type="checkbox" id="calibration_show_lines" checked> Outline lines (colour = axis)</label>
+          <label class="dbg-row"><input type="checkbox" id="calibration_show_labels"> Cube coordinates</label>
+          <label class="dbg-row"><input type="checkbox" id="calibration_show_diff"> Cubes vs mask (red = covered not purple, blue = purple not covered)</label>
+          <label class="dbg-row"><input type="checkbox" id="calibration_show_mask"> Purple mask</label>
+          <label class="dbg-row"><input type="checkbox" id="calibration_slow"> Slow down (step by step)</label>
+          <label class="dbg-row">Known vertical FOV <input type="number" id="calibration_fov" min="20" max="160" placeholder="auto"></label>
+          <div class="dbg-btns"><button id="calibration_recompute">Recompute</button></div>
+          <div id="calibration_stats" class="dbg-text"></div>
+          <div class="dbg-keys">x = add/remove probe cube · c = copy probe report · 0 = reset zoom · Esc = remove probe</div>
+
+          <div class="dbg-sec">Pipeline</div>
+          <div id="debug_info" class="dbg-text"></div>
+          <label class="dbg-row"><input type="checkbox" id="show_x"> Show X axis</label>
+          <label class="dbg-row"><input type="checkbox" id="show_y"> Show Y axis</label>
+          <label class="dbg-row"><input type="checkbox" id="show_z"> Show Z axis</label>
+          <div class="dbg-btns"><button onclick="exportVein()">Copy vein + seed (e)</button></div>
+
+          <div class="dbg-sec">Generator (new saved geode)</div>
+          <label class="dbg-col">Ore density: <span id="density_val"></span><input type="range" id="density_slider" min="0.01" max="0.3" step="0.01"></label>
+          <label class="dbg-col">Range (shell thickness): <span id="range_val"></span><input type="range" id="range_slider" min="0.5" max="5" step="0.1"></label>
+          <label class="dbg-col">Slime/honey preference (not wired yet): <span id="slime_pref_val"></span><input type="range" id="slime_pref_slider" min="0" max="100" step="1"></label>
+          <label class="dbg-col">Import JSON ({seed,size,ores} or {seed,vein}):<textarea id="import_json" rows="3"></textarea></label>
+          <div class="dbg-btns"><button id="generate_btn">Generate (r)</button></div>
+        </div>
       </div>
 
-      <div style="margin-top:8px;">
-        <label>Import JSON ({seed,size,ores} or {seed,vein}):</label><br>
-        <textarea id="import_json" rows="3" style="width:100%; font-size:11px; box-sizing:border-box;"></textarea>
+      <div id="layer_widget" class="glass" hidden>
+        <button class="round" data-action="layer-up" title="Layer above (↑)">▲</button>
+        <span id="layer_label"></span>
+        <button class="round" data-action="layer-down" title="Layer below (↓)">▼</button>
+        <button class="round" data-action="layers" title="Back to the whole build (L)">✕</button>
       </div>
 
-      <button id="generate_btn" style="width:100%; margin-top:8px; padding:6px;">Generate</button>
+      <div class="dock glass">
+        <ol id="stepper"></ol>
+        <span class="sep"></span>
+        <button class="go" id="next_btn" data-action="next">Next →</button>
+      </div>
+    </section>
+
+    <div id="toast" role="status"></div>
+
+    <!-- ===================== settings ===================== -->
+    <div id="settings_modal" hidden>
+      <div class="modal glass" role="dialog" aria-label="Settings">
+        <h3>Settings <button data-action="close-settings" title="Close">✕</button></h3>
+        <div class="group">Machines</div>
+        <div class="row"><div class="grow">Distance from the geode<small>Blocks of space between the geode and each machine.</small></div><span class="val" id="gap_val"></span></div>
+        <input type="range" id="gap_slider" min="0" max="6" step="1">
+        <div class="row"><div class="grow">Build on the other side<small>Which side of the geode each axis's machines go.</small></div></div>
+        <div class="chips"><label><input type="checkbox" id="invert_x"><span>X</span></label><label><input type="checkbox" id="invert_y"><span>Y</span></label><label><input type="checkbox" id="invert_z"><span>Z</span></label></div>
+        <div class="group">Viewing</div>
+        <div class="row"><div class="grow">Skip the build animation<small>After a scan, go straight to the last step instead of playing steps 2 to 7.</small></div><label class="switch"><input type="checkbox" id="skip_anim_toggle"><span></span></label></div>
+        <div class="group">Advanced</div>
+        <div class="row"><div class="grow">Debug tools<small>Show the intermediate data, overlays and per-axis views of every step.</small></div><label class="switch"><input type="checkbox" id="debug_toggle"><span></span></label></div>
+        <div class="row"><div class="grow">Saved geodes<small>Kept only in this browser.</small></div><button class="danger" data-action="clear-library">Delete all</button></div>
+      </div>
     </div>
   </body>
 </html>

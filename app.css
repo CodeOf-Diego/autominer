@@ -1,0 +1,191 @@
+/* Autominer app shell: landing page, workspace HUD, debug panel, settings (see js/App.js) */
+:root {
+	--text: #f1eefa; --muted: #a9a3bd; --glass: rgba(24, 20, 36, .66); --glass-line: rgba(255, 255, 255, .09);
+	--accent: #b48cff; --accent-ink: #1a1030; --accent-2: #6ee7d8; --ok: #4ade80; --warn: #facc15; --bad: #f87171; --debug: #fbbf24;
+}
+* { box-sizing: border-box }
+html, body { margin: 0; height: 100%; overflow: hidden }
+body {
+	color: var(--text); font: 14px/1.5 "Space Grotesk", system-ui, sans-serif;
+	background: radial-gradient(1200px 700px at 70% 30%, #2a1d48 0%, #120f1c 55%, #0b0a10 100%) fixed;
+}
+button { font: inherit; color: inherit; cursor: pointer }
+button:disabled { cursor: default; opacity: .55 }
+[hidden] { display: none !important }
+kbd { font: 11px ui-monospace, Consolas, monospace; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--glass-line); background: rgba(255, 255, 255, .06) }
+.ic { width: 18px; height: 18px; flex: none }
+.glass { background: var(--glass); border: 1px solid var(--glass-line); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); border-radius: 20px }
+.muted { color: var(--muted) }
+
+/* ---------- layers: 3D scene (0) < photo of step 1 (1) < HUD (10) < landing (20) < toast (40) < settings (50) ---------- */
+#scene_canvas { position: fixed; inset: 0; z-index: 0; touch-action: none }
+body[data-screen=landing] #scene_canvas { pointer-events: none }
+#calibration_view { display: none; position: fixed; inset: 0; z-index: 1; background: #07060b; align-items: center; justify-content: center }
+#calibration_zoom_box { overflow: hidden; max-width: 100%; max-height: 100%; line-height: 0 }
+#calibration_canvas { display: block; max-width: 100vw; max-height: 100vh; transform-origin: 0 0 }
+.viewport-label { position: fixed; z-index: 3; font: 600 12px "Space Grotesk", sans-serif; color: var(--debug); letter-spacing: 1px; pointer-events: none }
+body:not([data-screen=landing]) #landing, body:not([data-screen=workspace]) #workspace { display: none }
+
+/* ---------- landing ---------- */
+#landing { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; padding: 0 5vw; pointer-events: none }
+.launch { width: min(460px, 100%); padding: 30px; pointer-events: auto; max-height: calc(100vh - 48px); overflow: auto }
+.brand { font-weight: 700; font-size: 13px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent) }
+.launch h1 { font-size: 30px; line-height: 1.15; margin: 12px 0 8px; font-weight: 600; letter-spacing: -.5px }
+.lead { color: var(--muted); margin: 0 0 22px }
+.opt { width: 100%; display: flex; align-items: center; gap: 14px; padding: 14px; border: 1px solid var(--glass-line); background: rgba(255, 255, 255, .03); border-radius: 14px; text-align: left; margin-bottom: 10px; transition: .15s }
+.opt:hover, .opt:focus-visible { background: rgba(180, 140, 255, .12); border-color: rgba(180, 140, 255, .5); outline: none }
+.bub { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: rgba(180, 140, 255, .16); color: var(--accent); flex: none }
+.bub.grey { background: rgba(255, 255, 255, .06); color: var(--text) }
+.opt.teal .bub { background: rgba(110, 231, 216, .14); color: var(--accent-2) }
+.grow { flex: 1; min-width: 0 }
+.opt b, .saved summary b { display: block; font-weight: 600 }
+.opt small, .saved summary small { color: var(--muted) }
+.arr { color: var(--muted) }
+.saved { border: 1px solid var(--glass-line); border-radius: 14px; background: rgba(255, 255, 255, .03) }
+.saved summary { list-style: none; display: flex; align-items: center; gap: 14px; padding: 14px; cursor: pointer }
+.saved summary::-webkit-details-marker { display: none }
+.saved .chev { transition: .2s; font-size: 18px }
+.saved[open] .chev { transform: rotate(90deg) }
+.saved.empty .chev { visibility: hidden }
+#lib_list { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; max-height: 36vh; overflow: auto }
+#lib_list:empty { display: none }
+.row-g { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 10px; cursor: pointer }
+.row-g:hover, .row-g:focus-visible { background: rgba(255, 255, 255, .06); outline: none }
+.row-g img { width: 54px; height: 40px; border-radius: 8px; object-fit: cover; background: rgba(0, 0, 0, .3); flex: none }
+.row-g b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.row-g small { color: var(--muted) }
+.ring { width: 26px; height: 26px; flex: none }
+.row-g .del { border: 0; background: none; color: var(--muted); opacity: 0; padding: 4px 6px; border-radius: 6px }
+.row-g:hover .del, .row-g .del:focus-visible { opacity: 1 }
+.row-g .del:hover { color: var(--bad); background: rgba(248, 113, 113, .1) }
+#continue_btn { margin-top: 14px; width: 100%; display: flex; gap: 8px; align-items: center; padding: 10px 16px; border-radius: 99px; border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 600; text-align: left }
+#continue_btn [data-name] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#continue_btn small { font-weight: 400; opacity: .7; margin-left: auto; white-space: nowrap }
+.foot { margin-top: 18px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px }
+.foot button { background: none; border: 0; color: var(--muted); padding: 0; flex: none }
+.foot button:hover { color: var(--text) }
+.drop-hint { display: none; position: fixed; inset: 16px; border: 2px dashed var(--accent); border-radius: 24px; background: rgba(180, 140, 255, .08); align-items: center; justify-content: center; font-size: 20px; font-weight: 600 }
+body.dragging .drop-hint { display: flex }
+
+/* ---------- workspace HUD ---------- */
+#workspace { position: fixed; inset: 0; z-index: 10; pointer-events: none }
+#workspace > * { pointer-events: auto }
+.round { width: 34px; height: 34px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .07); display: grid; place-items: center; flex: none }
+.round:hover { background: rgba(255, 255, 255, .14) }
+.round.on { background: var(--accent); color: var(--accent-ink) }
+.tl { position: absolute; left: 20px; top: 20px; display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px; border-radius: 99px; max-width: calc(100vw - 200px) }
+#geode_name { border: 0; background: transparent; color: var(--text); font: 600 14px "Space Grotesk", sans-serif; width: 200px; min-width: 0; padding: 4px 6px; border-radius: 6px }
+#geode_name:hover { background: rgba(255, 255, 255, .04) }
+#geode_name:focus { outline: none; background: rgba(255, 255, 255, .08) }
+#save_status { font-size: 12px; color: var(--muted); padding-right: 8px; white-space: nowrap }
+#save_status::before { content: "● "; color: var(--ok) }
+#save_status[data-state=saving]::before { color: var(--warn) }
+#save_status[data-state=error]::before, #save_status[data-state=off]::before { color: var(--bad) }
+.tr { position: absolute; right: 20px; top: 20px; display: flex; gap: 6px; padding: 6px; border-radius: 99px }
+body[data-step="1"] #layers_btn { display: none }
+
+.leftcol { position: absolute; left: 20px; top: 84px; bottom: 96px; width: min(370px, calc(100vw - 40px)); display: flex; flex-direction: column; gap: 12px; pointer-events: none !important }
+.leftcol > * { pointer-events: auto }
+.card { padding: 18px 20px; flex: none }
+.eyebrow { font-size: 12px; color: var(--accent); letter-spacing: 1.5px; text-transform: uppercase; display: flex; gap: 10px; align-items: center }
+.eyebrow .bar { flex: 1; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden }
+.eyebrow .bar i { display: block; height: 100%; background: var(--accent); transition: width .3s }
+.mini { border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 6px; line-height: 1 }
+.mini:hover { background: rgba(255, 255, 255, .08); color: var(--text) }
+.card h2 { margin: 8px 0 6px; font-size: 21px; font-weight: 600; letter-spacing: -.3px }
+.card p { margin: 0; color: var(--muted) }
+.card.collapsed .more { display: none }
+.card.collapsed h2 { margin-bottom: 0 }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 12px; color: var(--muted) }
+.legend:empty { display: none }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px }
+#scan_status { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--glass-line); font-size: 13px }
+body[data-step="1"] #scan_status { display: block }
+#scan_status > div + div { margin-top: 6px }
+#scan_status .ok b { color: var(--ok) }
+#scan_status .bad b { color: var(--bad) }
+#scan_status .busy { display: flex; align-items: center; gap: 8px }
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .15); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none }
+@keyframes spin { to { transform: rotate(360deg) } }
+.meter { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .08); overflow: hidden }
+.meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .4s }
+.pick { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .05) }
+.pick button { border: 0; border-radius: 99px; padding: 5px 12px; background: var(--accent); color: var(--accent-ink); font-weight: 600; white-space: nowrap }
+.pick kbd { border-color: rgba(26, 16, 48, .3); background: rgba(26, 16, 48, .12) }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; font-size: 12px }
+
+.dock { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 99px; max-width: calc(100vw - 16px) }
+#stepper { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none }
+.st { position: relative; height: 44px; min-width: 44px; padding: 0 13px; border-radius: 99px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; color: var(--muted); transition: background .2s, color .2s }
+.st:hover { background: rgba(255, 255, 255, .07); color: var(--text) }
+.st .lbl { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width .25s; font-weight: 500 }
+.st.current { background: var(--accent); color: var(--accent-ink) }
+.st.current .lbl { max-width: 120px }
+.st.done { color: var(--text) }
+.st.done::after { content: ""; position: absolute; bottom: 5px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent-2) }
+.st.skipped, .st.locked { opacity: .3; cursor: default }
+.st.skipped:hover, .st.locked:hover { background: none; color: var(--muted) }
+.st .tip { position: absolute; bottom: 54px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; padding: 5px 10px; border-radius: 8px; background: rgba(12, 10, 18, .94); color: var(--text); opacity: 0; pointer-events: none; transition: .15s }
+.st:hover .tip { opacity: 1 }
+.sep { width: 1px; height: 24px; background: var(--glass-line); margin: 0 4px }
+.go { height: 44px; border-radius: 99px; border: 0; padding: 0 18px; background: rgba(255, 255, 255, .08); font-weight: 600; white-space: nowrap }
+.go:not(:disabled):hover { background: rgba(255, 255, 255, .15) }
+
+#layer_widget { position: absolute; right: 20px; top: 76px; display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 99px }
+#layer_widget span { font-weight: 600; padding: 0 6px; min-width: 100px; text-align: center }
+
+#toast { position: fixed; z-index: 40; left: 50%; bottom: 96px; transform: translate(-50%, 10px); padding: 10px 16px; border-radius: 12px; background: rgba(12, 10, 18, .94); border: 1px solid var(--glass-line); opacity: 0; pointer-events: none; transition: .2s; max-width: calc(100vw - 32px) }
+#toast.show { opacity: 1; transform: translate(-50%, 0) }
+
+/* ---------- debug ---------- */
+#debug_panel { display: none; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; font-size: 12.5px; border-color: rgba(251, 191, 36, .25) }
+body[data-debug="1"] #debug_panel { display: block }
+.dbg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px }
+.dbg-head b { color: var(--debug); letter-spacing: 1.5px; font-size: 11px }
+.dbg-head button { background: none; border: 0; color: var(--muted) }
+.dbg-line { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--muted) }
+.dbg-sec { margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid var(--glass-line); font-size: 11px; color: var(--debug); letter-spacing: 1px; text-transform: uppercase }
+.dbg-row { display: flex; align-items: center; gap: 8px; padding: 2px 0 }
+.dbg-col { display: block; padding: 3px 0 }
+.dbg-col input[type=range], .dbg-col textarea { display: block; width: 100% }
+#debug_panel select, #debug_panel input[type=number], #debug_panel textarea { background: rgba(0, 0, 0, .3); border: 1px solid var(--glass-line); color: var(--text); border-radius: 6px; padding: 3px 6px; font: inherit }
+#debug_panel select, #debug_panel input[type=number] { margin-left: auto }
+#debug_panel textarea { font: 11px ui-monospace, Consolas, monospace }
+.dbg-text { margin-top: 6px; color: #d9d4e8 }
+.dbg-keys { margin-top: 6px; color: var(--muted); font-size: 11px }
+.dbg-btns { display: flex; gap: 6px; margin-top: 8px }
+.dbg-btns button, #debug_panel .dbg-text button { flex: 1; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--glass-line); background: rgba(255, 255, 255, .06) }
+.dbg-btns button:hover { background: rgba(255, 255, 255, .12) }
+
+/* ---------- settings ---------- */
+#settings_modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(5, 4, 10, .5) }
+.modal { width: min(420px, calc(100vw - 32px)); padding: 22px; max-height: calc(100vh - 32px); overflow: auto }
+.modal h3 { margin: 0 0 6px; font-weight: 600; font-size: 18px; display: flex; justify-content: space-between }
+.modal h3 button { background: none; border: 0; color: var(--muted) }
+.group { margin-top: 16px; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent) }
+.row { display: flex; gap: 14px; align-items: center; padding: 10px 0 6px }
+.row small { display: block; color: var(--muted) }
+.val { font-weight: 600 }
+#gap_slider { width: 100%; accent-color: var(--accent) }
+.chips { display: flex; gap: 8px }
+.chips label { position: relative }
+.chips input { position: absolute; opacity: 0 }
+.chips span { display: inline-block; padding: 5px 16px; border-radius: 99px; border: 1px solid var(--glass-line); cursor: pointer; font-weight: 600 }
+.chips input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+.chips input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px }
+.switch { position: relative; width: 40px; height: 22px; flex: none }
+.switch input { opacity: 0; position: absolute; inset: 0; margin: 0; cursor: pointer; z-index: 1 }
+.switch span { position: absolute; inset: 0; border-radius: 99px; background: rgba(255, 255, 255, .15); transition: .15s }
+.switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: .15s }
+.switch input:checked + span { background: var(--accent) }
+.switch input:checked + span::after { transform: translateX(18px) }
+.danger { border: 1px solid rgba(248, 113, 113, .35); color: #fca5a5; background: none; border-radius: 8px; padding: 6px 10px; flex: none }
+
+@media (max-width: 760px) {
+	#landing { padding: 0 12px }
+	.dock { left: 8px; right: 8px; transform: none; overflow-x: auto }
+	.st.current .lbl { max-width: 0 }
+	.leftcol { top: 76px; bottom: 84px }
+	#geode_name { width: 120px }
+	#save_status { display: none }
+}

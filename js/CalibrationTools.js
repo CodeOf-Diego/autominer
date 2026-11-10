@@ -20,6 +20,8 @@ function onOpenCvReady(resolved) {
         else if (++tries > 600) clearInterval(poll) // 60 s: give up quietly
     }, 100)
 }
+// opencv.js is async: from cache it can load before this deferred file runs, so its onload found no onOpenCvReady and only set the flag
+if (window.cvScriptLoaded) onOpenCvReady()
 
 /* ------------------------------------------------------------------------------------------
  * Automatic calibration (no human input). Hough on the whole photo is hopeless on a busy rock

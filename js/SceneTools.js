@@ -96,64 +96,184 @@ class SceneTools {
 
 	}
 	
+	/**
+	 * Where the scene is drawn inside the full-window canvas: the main (perspective) view starts x0 px from the left (the
+	 * landing page keeps the left side for its panel), and with ortho on the right third holds the 3 orthogonal per-axis
+	 * views (debug only). Change it with setView(); layout() recomputes every size from the window.
+	 */
+	view = { x0: 0, ortho: false }
+	debug = false
+	visible3D = true
+
 	setUpCameras() {
 		ST.axesLines  = new THREE.AxesHelper();
+		ST.axesLines.visible = false // debug only, see setDebug()
 		ST.scene.add(ST.axesLines);
-		
-		ST.H = window.innerHeight-10, ST.W = window.innerWidth-10
-		ST.Wmain = ST.W*2/3
-		ST.Horth = ST.H/3
-		ST.Worth = ST.W - ST.Wmain
 
-		// Create a new Three.js renderer
-		ST.renderer = new THREE.WebGLRenderer();
-		ST.renderer.setSize(ST.W, ST.H);
+		// transparent, so the page background shows behind the geode
+		ST.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+		ST.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+		ST.renderer.setClearColor(0x000000, 0);
+		ST.renderer.domElement.id = 'scene_canvas'
 		document.body.appendChild(ST.renderer.domElement);
 
-		// Create a new Three.js camera
-		ST.camera = new THREE.PerspectiveCamera(
-			75,
-			ST.Wmain / ST.H,
-			0.1,
-			1000
-		);
-	
-		ST.camera.position.x = -12;
-		ST.camera.position.y = 10;
-		ST.camera.position.z = 12;
+		ST.camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+		ST.camera.position.set(-12, 10, 12);
 
 		ST.controls = new THREE.OrbitControls(ST.camera, ST.renderer.domElement);
 		ST.controls.enableDamping = true;
 		ST.controls.dampingFactor = 0.05;
+		ST.controls.addEventListener('start', () => { ST.tweenId++ }); // grabbing the view cancels a camera glide
 
-		let zoom = ST.H/30
 		// what plane each orthogonal camera looks at, since it's not obvious from the viewport alone
 		let planeNames = { x: 'XY', y: 'XZ', z: 'YZ' }
 		ST.viewportLabelEls = []
-			ST.axes.forEach((axis,pos)=> {
-			ST.Ocamera[axis] = new THREE.OrthographicCamera(
-				ST.Worth / zoom, ST.Worth / -zoom,
-				ST.Horth / -zoom, ST.Horth / zoom,
-				1, 1000
-			);
+		ST.axes.forEach((axis) => {
+			ST.Ocamera[axis] = new THREE.OrthographicCamera(1, -1, -1, 1, 1, 1000); // real frustum set by layout()
 			ST.Ocamera[axis].position.set(axis=='z'?500:0, axis=='y'?500:0, axis=='x'?500:0);
 			ST.Ocamera[axis].lookAt(ST.scene.position);
 
 			let label = document.createElement('span')
+			label.className = 'viewport-label'
 			label.textContent = planeNames[axis]
-			label.style.position = 'absolute'
-			label.style.zIndex = 10
-			label.style.color = 'white'
-			label.style.fontSize = '16px'
-			// left-aligned horizontally, centered vertically on the viewport's row
-			label.style.left = (ST.Wmain + 6) + 'px'
-			// viewports are stacked bottom-up in WebGL coordinates, so row `pos` sits (pos+1) rows up from the bottom
-			label.style.top = (ST.H - ST.Horth*(pos+1) + ST.Horth/2) + 'px'
-			label.style.transform = 'translateY(-50%)'
-			label.style.pointerEvents = 'none'
 			document.body.appendChild(label)
 			ST.viewportLabelEls.push(label)
 		})
+		window.addEventListener('resize', () => { ST.layout(); if (ST.onLayout) ST.onLayout() })
+		ST.layout()
+	}
+
+	setView(v) { Object.assign(ST.view, v); ST.layout() }
+
+	/**
+	 * Points the main camera at the world origin - the geode's center (see addMeshToScene's `center`), so it stays in the
+	 * same spot whatever step is shown - and moves it back just enough to see everything drawn around it, keeping the
+	 * current viewing direction (or `dir`, a vector from the target towards the camera)
+	 */
+	frame(dir) {
+		ST.tweenId++
+		ST.resetLens()
+		let box = new THREE.Box3()
+		ST.scene.children.forEach((c) => { if (c !== ST.axesLines) box.expandByObject(c) })
+		if (box.isEmpty()) return
+		let center = new THREE.Vector3(), r = 0
+		for (let corner of [box.min, box.max].flatMap((a) => [box.min, box.max].flatMap((b) => [box.min, box.max].map((c) => new THREE.Vector3(a.x, b.y, c.z)))))
+			r = Math.max(r, corner.length())
+		let vfov = ST.camera.fov * Math.PI / 180, hfov = 2 * Math.atan(Math.tan(vfov / 2) * ST.camera.aspect)
+		let dist = 0.9 * r / Math.sin(Math.min(vfov, hfov) / 2) // the box's bounding sphere is loose: a bit closer still shows it all
+		let d = dir ? dir.clone() : ST.camera.position.clone().sub(ST.controls.target)
+		if (d.lengthSq() < 1e-9) d.set(-12, 10, 12)
+		ST.controls.target.copy(center)
+		ST.camera.position.copy(center).addScaledVector(d.normalize(), dist)
+		ST.controls.update()
+	}
+
+	tweenId = 0
+
+	/**
+	 * Like frame(), but glides there over `ms`: position, target and - after matchCamera() - the lens (focal and principal
+	 * point) are interpolated, so the photo's viewpoint opens out into the normal orbit view without a cut. Any manual
+	 * camera move (drag/zoom) or another frame()/matchCamera() call cancels it.
+	 */
+	frameSmooth(ms = 800, dir) {
+		let from = { pos: ST.camera.position.clone(), target: ST.controls.target.clone(), lens: ST.lens ? Object.assign({}, ST.lens) : null }
+		ST.frame(dir)
+		let to = { pos: ST.camera.position.clone(), target: ST.controls.target.clone() }
+		ST.camera.position.copy(from.pos); ST.controls.target.copy(from.target)
+		ST.lens = from.lens; ST.applyLens()
+		let id = ++ST.tweenId, t0 = performance.now()
+		let focalEnd = (ST.H / 2) / Math.tan(37.5 * Math.PI / 180) // the normal 75 deg lens
+		let pxEnd = ST.view.x0 + ST.Wmain / 2, pyEnd = ST.H / 2
+		let step = () => {
+			if (id !== ST.tweenId) return
+			let k = Math.min(1, (performance.now() - t0) / ms), e = k * k * (3 - 2 * k) // smoothstep
+			ST.camera.position.lerpVectors(from.pos, to.pos, e)
+			ST.controls.target.lerpVectors(from.target, to.target, e)
+			if (from.lens && k < 1) {
+				ST.lens = { focal: from.lens.focal + (focalEnd - from.lens.focal) * e, px: from.lens.px + (pxEnd - from.lens.px) * e, py: from.lens.py + (pyEnd - from.lens.py) * e }
+				ST.applyLens()
+			} else if (k >= 1) ST.resetLens()
+			ST.controls.update()
+			if (k < 1) requestAnimationFrame(step)
+		}
+		requestAnimationFrame(step)
+	}
+
+	/** Back to the normal lens (75 deg, optical axis in the middle of the view) after matchCamera() */
+	resetLens() {
+		ST.lens = null
+		ST.camera.fov = 75
+		ST.camera.clearViewOffset()
+		ST.camera.updateProjectionMatrix()
+	}
+
+	/**
+	 * Puts the main camera exactly where main.js's photoCameraPose() says the photo was taken from, with the photo's
+	 * focal length and principal point on screen (in px), so the 3D view lines up pixel for pixel with the photo just
+	 * hidden. Orbiting then turns around pose.target, which stays on that principal point; frame() undoes the lens.
+	 */
+	matchCamera(pose) {
+		ST.tweenId++
+		ST.camera.position.copy(pose.position)
+		ST.camera.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(pose.right, pose.up, pose.back))
+		ST.controls.target.copy(pose.target)
+		ST.lens = { focal: pose.focal, px: pose.px, py: pose.py }
+		ST.applyLens()
+		ST.controls.update()
+	}
+
+	/** The matchCamera() lens on the current layout: vertical FOV from the focal, view offset for the principal point */
+	applyLens() {
+		let L = ST.lens, c = ST.camera
+		if (!L) return
+		c.fov = 2 * Math.atan((ST.H / 2) / L.focal) * 180 / Math.PI
+		// with the full image the view's own size, shifting the window by (x, y) moves the optical axis from the
+		// middle of the view to (Wmain/2 - x, H/2 - y)
+		c.setViewOffset(ST.Wmain, ST.H, ST.Wmain / 2 - (L.px - ST.view.x0), ST.H / 2 - L.py, ST.Wmain, ST.H)
+		c.updateProjectionMatrix()
+	}
+
+	/**
+	 * Aims the 3 orthogonal per-axis cameras (debug) at world point {x,y,z}: the geode sits at the origin, but these
+	 * views should show the whole display (geode + planes), so main.js points them at its middle on every render
+	 */
+	setOrthoTarget(t) {
+		ST.axes.forEach((axis) => {
+			let c = ST.Ocamera[axis]
+			c.position.set(t.x + (axis=='z'?500:0), t.y + (axis=='y'?500:0), t.z + (axis=='x'?500:0))
+			c.lookAt(t.x, t.y, t.z)
+		})
+	}
+
+	setDebug(on) { ST.debug = on; ST.axesLines.visible = on }
+
+	/** Sizes the renderer, the cameras and the XY/XZ/YZ labels from the window and ST.view */
+	layout() {
+		let W = window.innerWidth, H = window.innerHeight
+		ST.W = W; ST.H = H
+		ST.renderer.setSize(W, H)
+		ST.Worth = ST.view.ortho ? Math.round(W / 3) : 0
+		ST.Wmain = Math.max(1, W - ST.Worth - ST.view.x0)
+		ST.Horth = H / 3
+		ST.camera.aspect = ST.Wmain / H
+		ST.camera.updateProjectionMatrix()
+		ST.applyLens()
+		let zoom = H / 30
+		ST.axes.forEach((axis, pos) => {
+			let c = ST.Ocamera[axis]
+			c.left = ST.Worth / zoom; c.right = ST.Worth / -zoom; c.top = ST.Horth / -zoom; c.bottom = ST.Horth / zoom
+			c.updateProjectionMatrix()
+			let label = ST.viewportLabelEls[pos]
+			label.style.left = (W - ST.Worth + 8) + 'px'
+			// viewports are stacked bottom-up in WebGL coordinates, so row `pos` sits (pos+1) rows up from the bottom
+			label.style.top = (H - ST.Horth * (pos + 1) + 10) + 'px'
+		})
+		ST.updateLabelVisibility()
+	}
+
+	updateLabelVisibility() {
+		let on = ST.visible3D && ST.view.ortho
+		ST.viewportLabelEls.forEach((el) => el.style.display = on ? '' : 'none')
 	}
 
 	/**
@@ -162,8 +282,9 @@ class SceneTools {
 	 * instead. Group labels are handled separately via clearGroupLabels().
 	 */
 	set3DVisible(visible) {
+		ST.visible3D = visible
 		ST.renderer.domElement.style.display = visible ? '' : 'none'
-		ST.viewportLabelEls.forEach((el) => el.style.display = visible ? '' : 'none')
+		ST.updateLabelVisibility()
 	}
 
 
@@ -174,9 +295,12 @@ class SceneTools {
 	 * instead of the whole vein/blueprint - the current layer (i.y === layerY) at full opacity,
 	 * everything below it (already "built") faded with GHOST_OPACITY as a visual reference,
 	 * anything above it left out entirely since it hasn't been reached yet.
+	 * center: the matrix index {x,y,z} drawn at the world origin (cell i sits at i - center).
+	 * main.js passes the geode's own center, so the geode stays put whatever the display around
+	 * it grows into (planes, gap, inversions); defaults to the middle of the matrix.
 	 */
-	addMeshToScene(vein, layerY) {
-		const matrixSize = { x: vein.maxX(), y: vein.maxY(), z: vein.maxZ() };
+	addMeshToScene(vein, layerY, center) {
+		if (!center) center = { x: vein.maxX() / 2, y: vein.maxY() / 2, z: vein.maxZ() / 2 };
 
 		// Define the size of each voxel
 		let voxelSize = 1;
@@ -190,8 +314,8 @@ class SceneTools {
 			if (cell === Voxels.HONEY_BLOCK) return topBottomSideMaterial('honey_block_top', 'honey_block_bottom', 'honey_block_side', opacity)
 			if (cell === Plains.ADJACENT) return flatMaterial(0xffff00, opacity)
 			if (cell === Plains.SUPPORT) return flatMaterial(0xffbb00, opacity)
-			if (cell === Voxels.BLU) return flatMaterial(0x0000ff, opacity)
-			if (cell === Voxels.RED) return flatMaterial(0xff0000, opacity)
+			if (cell === Voxels.BLU) return ST.debug ? flatMaterial(0x0000ff, opacity) : undefined // debug markers
+			if (cell === Voxels.RED) return ST.debug ? flatMaterial(0xff0000, opacity) : undefined
 			return undefined
 		}
 
@@ -233,14 +357,34 @@ class SceneTools {
 			if (material !== undefined) {
 				let voxelMesh = new THREE.Mesh(voxelGeometry, material);
 				voxelMesh.position.set(
-				(i.x - matrixSize.x / 2) * voxelSize,
-				(i.y - matrixSize.y / 2) * voxelSize,
-				(i.z - matrixSize.z / 2) * voxelSize
+				(i.x - center.x) * voxelSize,
+				(i.y - center.y) * voxelSize,
+				(i.z - center.z) * voxelSize
 				);
 				voxelMeshes.push(voxelMesh);
 				ST.scene.add(voxelMesh);
 			}
 		})
+	}
+
+	/**
+	 * Layer view helper: a faint square grid lying on the bottom face of layer `layerY`, one
+	 * square per block, covering cell indices x in [ext.minX, ext.maxX] and z in [ext.minZ,
+	 * ext.maxZ]. Uses the same `center` as addMeshToScene() (cell i is centered at i - center),
+	 * so the lines fall exactly on the block edges and make it easy to count blocks in the layer.
+	 */
+	addLayerGrid(layerY, center, ext) {
+		// a hair above the ghosted layer's top faces, so the lines don't z-fight with them
+		let y = layerY - center.y - 0.5 + 0.01
+		let x0 = ext.minX - center.x - 0.5, x1 = ext.maxX - center.x + 0.5
+		let z0 = ext.minZ - center.z - 0.5, z1 = ext.maxZ - center.z + 0.5
+		let pts = []
+		for (let x = x0; x <= x1 + 1e-6; x++) pts.push(x, y, z0, x, y, z1)
+		for (let z = z0; z <= z1 + 1e-6; z++) pts.push(x0, y, z, x1, y, z)
+		let geometry = new THREE.BufferGeometry()
+		geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+		let material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18, depthWrite: false })
+		ST.scene.add(new THREE.LineSegments(geometry, material))
 	}
 
 	/**
@@ -261,11 +405,11 @@ class SceneTools {
 
 	/**
 	 * Renders a list of MachineTools.computeMachineBlocks() blocks with real textures, oriented
-	 * correctly for pistons/observers, using the same centering convention as addMeshToScene()
+	 * correctly for pistons/observers, using the same `center` as addMeshToScene()
 	 * so they line up with it. layerY: when set (see main.js's layerView), draws only the blocks
 	 * at that world Y instead of the whole machine.
 	 */
-	addMachinesToScene(machineBlocks, displaySize, layerY) {
+	addMachinesToScene(machineBlocks, center, layerY) {
 		const voxelSize = 1;
 		let voxelGeometry = new THREE.BoxGeometry(voxelSize, voxelSize, voxelSize);
 		// same cutoff/ghost rule as addMeshToScene(): keep y <= layerY, fade y < layerY
@@ -295,9 +439,9 @@ class SceneTools {
 
 			let mesh = new THREE.Mesh(voxelGeometry, material);
 			mesh.position.set(
-				(b.x - displaySize.x / 2) * voxelSize,
-				(b.y - displaySize.y / 2) * voxelSize,
-				(b.z - displaySize.z / 2) * voxelSize
+				(b.x - center.x) * voxelSize,
+				(b.y - center.y) * voxelSize,
+				(b.z - center.z) * voxelSize
 			);
 			ST.scene.add(mesh);
 		});
@@ -316,12 +460,11 @@ class SceneTools {
 	/**
 	 * Draws a small number over each final group's centroid in the 3 orthogonal viewports, so a
 	 * specific group can be pointed at by index ("group 0", "group 5", ...) unambiguously.
-	 * displaySize is the combined display matrix's {x,y,z} dimensions (same as addMeshToScene's
-	 * matrixSize); originalSize is the vein's own {x,y,z}; gap/invert must match whatever was
+	 * center is the same display index addMeshToScene() drew at the world origin; originalSize is the vein's own {x,y,z}; gap/invert must match whatever was
 	 * passed to Tools3D.buildDisplay() for this render, so labels land where the blueprint
 	 * actually is. show (default all true) skips an axis entirely when its blueprint is hidden.
 	 */
-	updateGroupLabels(data_layers, displaySize, originalSize, gap, invert, show={x:true,y:true,z:true}) {
+	updateGroupLabels(data_layers, center, originalSize, gap, invert, show={x:true,y:true,z:true}) {
 		ST.clearGroupLabels();
 		const voxelSize = 1;
 		const pos = { x: 0, y: 1, z: 2 }; // row index of each axis's viewport, matches ST.axes order
@@ -353,14 +496,14 @@ class SceneTools {
 				world[ppd[1]] = shift[ppd[1]] + label.j;
 
 				let point = new THREE.Vector3(
-					(world.x - displaySize.x / 2) * voxelSize,
-					(world.y - displaySize.y / 2) * voxelSize,
-					(world.z - displaySize.z / 2) * voxelSize
+					(world.x - center.x) * voxelSize,
+					(world.y - center.y) * voxelSize,
+					(world.z - center.z) * voxelSize
 				);
 				point.project(camera);
 				if (point.z < -1 || point.z > 1) continue; // behind/outside this camera
 
-				let screenX = ST.Wmain + (point.x + 1) / 2 * ST.Worth;
+				let screenX = ST.W - ST.Worth + (point.x + 1) / 2 * ST.Worth;
 				let screenY = (ST.H - ST.Horth * (pos[cameraAxis] + 1)) + (1 - point.y) / 2 * ST.Horth;
 
 				let el = document.createElement('span');
@@ -385,17 +528,22 @@ class SceneTools {
 	// Render the scene with each camera
 	animate() {
 		requestAnimationFrame(ST.animate);
+		if (!ST.visible3D) return // stage 1 shows the photo instead
+
+		// the canvas is transparent: clear all of it, then draw each viewport in its scissor box
+		ST.renderer.setScissorTest(false);
+		ST.renderer.clear();
+		ST.renderer.setScissorTest(true);
 
 		// Render main camera
-		ST.renderer.setScissorTest(true);
-		ST.renderer.setScissor(0, 0, ST.Wmain, ST.H);
-		ST.renderer.setViewport(0, 0, ST.Wmain, ST.H);
+		ST.renderer.setScissor(ST.view.x0, 0, ST.Wmain, ST.H);
+		ST.renderer.setViewport(ST.view.x0, 0, ST.Wmain, ST.H);
 		ST.renderer.render(ST.scene, ST.camera);
 
-		// Render othogonal cameras
-		ST.axes.forEach((axis,pos)=> {
-			ST.renderer.setScissor(ST.Wmain, ST.Horth*pos, ST.Worth, ST.Horth);
-			ST.renderer.setViewport(ST.Wmain, ST.Horth*pos, ST.Worth, ST.Horth);
+		// Render othogonal cameras (debug only)
+		if (ST.view.ortho) ST.axes.forEach((axis,pos)=> {
+			ST.renderer.setScissor(ST.W - ST.Worth, ST.Horth*pos, ST.Worth, ST.Horth);
+			ST.renderer.setViewport(ST.W - ST.Worth, ST.Horth*pos, ST.Worth, ST.Horth);
 			ST.renderer.render(ST.scene, ST.Ocamera[axis]);
 		})
 

@@ -4,7 +4,7 @@ synth_page.js  generator injected in the page: window.makeSynth(seed, {bright, D
                Random cubes in a sphere shell, grown in clusters; cubes completely hidden behind nearer ones are dropped (hidMin).
 synth_save.js  writes PNG + truth JSON into reference/synthetic/ (never deletes).  node synth_save.js <seeds> <brightness list> [optsJSON] [label]
 synth_run.js   runs the app's pipeline on scenes and prints lattice-relative recall/precision, camera errors and time.
-               node synth_run.js <seeds> <brightness> [optsJSON]     e.g. '{"DR":[6,10],"RR":[3.5,5]}' for close-up scenes;  node synth_run.js photos   for the 3 real photos
+               node synth_run.js <seeds> <brightness> [optsJSON]     e.g. '{"DR":[6,10],"RR":[3.5,5]}' for close-up scenes;  node synth_run.js photos [geode07,...]   for the real photos (all 7 by default)
 harness.js     opens index.html in headless Chromium (Playwright, installed OUTSIDE the repo: npm install playwright in a scratch folder).
 
 These scripts expect to sit next to a node_modules with playwright; copy them to a scratch folder with `npm install playwright` first.

@@ -185,12 +185,17 @@ function newRun(seed) {
 	processVein(vein, seed)
 }
 
-/** Briefly shows a message in the stage label, then restores it */
+/** Briefly shows a message (a toast at the bottom of the page) */
 function flashStageMessage(text) {
-	if (!stage_info) return
-	let original = stage_info.innerHTML
-	stage_info.innerHTML = text
-	setTimeout(() => { stage_info.innerHTML = original }, 1500)
+	App.toast(text)
+}
+
+/**
+ * Whether a stage-1 overlay is on: its checkbox in the debug panel when debug is on, otherwise the default for end users
+ * (the detected cubes and the floor grid, without the diagnostic layers)
+ */
+function overlayOn(checkbox, userDefault) {
+	return App.debug ? checkbox.checked : userDefault
 }
 
 /** Copies the exact vein + seed currently shown to the clipboard, so a specific result can be shared and reloaded later */
@@ -218,16 +223,14 @@ function exportVein() {
 function renderCalibrationStage() {
 	ST.set3DVisible(false)
 	ST.clearGroupLabels()
-	calibration_view.style.display = 'block'
-	// the settings panel (vein density/gap/etc, irrelevant here) covers a big chunk of the left
-	// side of the screen and would swallow drags meant for the VP handles; 'm' still toggles it back
-	settings_menu.style.display = 'none'
+	calibration_view.style.display = 'flex'
 
-	if (stage_info) stage_info.innerHTML = 'Stage 1/' + LAST_STAGE + ' - ' + STAGE_NAMES[1] + ' (keys 1-' + LAST_STAGE + ' to switch)'
+	stage_info.innerHTML = 'Stage 1/' + LAST_STAGE + ' - ' + STAGE_NAMES[1] + ' - photo ' + (manualEditsPhoto || '-')
 
 	if (!calibrationImage.complete || calibrationImage.naturalWidth === 0) {
-		if (stage_info) stage_info.innerHTML += ' | loading photo...'
-		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 200)
+		stage_info.innerHTML += ' | loading photo...'
+		updateScanSummary()
+		setTimeout(() => { if (currentStage === 1 && App.inWorkspace()) renderCalibrationStage() }, 200)
 		return
 	}
 
@@ -238,7 +241,7 @@ function renderCalibrationStage() {
 
 	// manual line drawing works immediately; the automatic fit needs OpenCV.js, which loads async
 	if (!cvReady) {
-		setTimeout(() => { if (currentStage === 1) renderCalibrationStage() }, 500)
+		setTimeout(() => { if (currentStage === 1 && App.inWorkspace()) renderCalibrationStage() }, 500)
 		return
 	}
 
@@ -254,7 +257,7 @@ async function runAutoCalibration() {
 	let token = ++autoCalToken
 	let alive = () => token === autoCalToken
 	autoCal = null; autoCubes = null; autoLive = null; autoMask = null; autoLines = null; probe = null
-	let fov = parseFloat(calibration_fov.value)
+	let fov = App.debug ? parseFloat(calibration_fov.value) : NaN
 	await setPhase('mask')
 	if (!alive()) return
 	let an = amethystAnalysis(calibrationImage, { maxW: 800, nPix: 1500 })
@@ -274,7 +277,7 @@ async function runAutoCalibration() {
 		if (!alive()) return
 		autoLines.shown = i + 1
 		redrawCalibrationCanvas()
-		if (calibration_slow.checked) await sleep(250)
+		if (App.debug && calibration_slow.checked) await sleep(250)
 		else if (i % 10 === 9) await tick()
 	}
 	await setPhase('camera')
@@ -332,7 +335,7 @@ async function runAutoCalibration() {
 	autoCubes = result; autoLive = null
 	autoCalState = 'done'
 	redrawCalibrationCanvas()
-	usePhotoVein()
+	usePhotoVein(true)
 }
 
 /**
@@ -341,8 +344,17 @@ async function runAutoCalibration() {
  * cell index, so they survive a change of the lattice origin: each edit applies to the cell whose centre is within 0.3 of P.
  */
 let manualEdits = [], manualEditsPhoto = null
-function loadManualEdits(photo) { manualEditsPhoto = photo; try { manualEdits = JSON.parse(localStorage.getItem('autominer.edits.' + photo) || '[]') } catch (e) { manualEdits = [] } }
-function saveManualEdits() { try { localStorage.setItem('autominer.edits.' + manualEditsPhoto, JSON.stringify(manualEdits)) } catch (e) {} }
+// a saved geode keeps its edits in its own record (App.editsFor/saveEdits, autosaved); the built-in photos keep them in localStorage
+function loadManualEdits(photo) {
+	manualEditsPhoto = photo
+	let own = App.editsFor(photo)
+	if (own) { manualEdits = own; return }
+	try { manualEdits = JSON.parse(localStorage.getItem('autominer.edits.' + photo) || '[]') } catch (e) { manualEdits = [] }
+}
+function saveManualEdits() {
+	if (App.saveEdits(manualEditsPhoto, manualEdits)) return
+	try { localStorage.setItem('autominer.edits.' + manualEditsPhoto, JSON.stringify(manualEdits)) } catch (e) {}
+}
 
 /** The lattice cell (i, j, k) whose centre is P (within 0.3 blocks), or null */
 function cellAt(A, P) {
@@ -383,7 +395,7 @@ function clearManualEdits() { manualEdits = []; saveManualEdits(); redrawCalibra
  * axes are a mirror image of Minecraft's (cameraAxes: right x down = -forward, determinant -1), so x is flipped to keep the geode's
  * handedness; j is up. The random vein ('r' or the generate button) still works and stays until the next photo result.
  */
-function usePhotoVein() {
+function usePhotoVein(fromScan) {
 	let { cubes } = finalCubes()
 	if (!cubes.length) return
 	const M = 2 // empty cells around it, as the random vein has
@@ -392,8 +404,42 @@ function usePhotoVein() {
 	let parsed = veinFromExport({ seed: 1, size: [0, 1, 2].map((a) => hi[a] - lo[a] + 1 + 2 * M), ores })
 	processVein(parsed.vein, parsed.seed)
 	pipeline.source = manualEditsPhoto
+	pipeline.photoMap = { lo, hi, M, origin: autoCubes.origin.slice(), ax: autoCubes.ax, fov: autoCubes.fov } // for photoCameraPose()
 	addDebugInfo()
+	App.onPhotoVein(manualEditsPhoto, cubes.length, fromScan)
 	if (currentStage !== 1) renderStage(currentStage)
+}
+
+/**
+ * The 3D camera that sees the geode exactly as the stage-1 photo shows it on screen right now, so going from step 1 to 2
+ * swaps the photo for the 3D blocks without anything visibly moving. Must be called while the photo is still shown
+ * (it reads where the canvas sits, zoom included). Returns null when the vein shown isn't this photo's.
+ *
+ * Camera space is the calibration's: x right, y down, z forward, 1 unit = 1 block. A display cell at world w (three.js,
+ * geode centered at the origin, see renderStage's `center`) is lattice cell (i, j, k) = (hi0 + M - x, y + lo1 - M,
+ * z + lo2 - M) with x/y/z = w + (size - 1) / 2 (see usePhotoVein), so camera point = R w + P0, R's columns being
+ * (-ex, ey, ez) - a proper rotation, the x flip undoing the lattice's mirror image.
+ * Returns { position, right, up, back, target } (world THREE.Vector3s), focal (screen px) and the principal point (screen px).
+ */
+function photoCameraPose() {
+	let pm = pipeline && pipeline.photoMap
+	if (!pm || !autoCubes || pipeline.source !== manualEditsPhoto || calibration_view.style.display === 'none') return null
+	let rect = calibration_canvas.getBoundingClientRect()
+	if (!rect.width || !rect.height) return null
+	let { ex, ey, ez } = pm.ax, dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+	let C = [0, 1, 2].map((a) => (pm.hi[a] - pm.lo[a] + 2 * pm.M) / 2) // (size - 1) / 2
+	let ci = pm.hi[0] + pm.M - C[0], cj = C[1] + pm.lo[1] - pm.M, ck = C[2] + pm.lo[2] - pm.M
+	let P0 = [0, 1, 2].map((a) => pm.origin[a] + ci * ex[a] + cj * ey[a] + ck * ez[a]) // camera-space point of the world origin
+	// rows of R = the camera's own axes (x right, y down, z forward) written in world coordinates
+	let row = (b) => new THREE.Vector3(-ex[b], ey[b], ez[b])
+	let right = row(0), down = row(1), forward = row(2)
+	let position = new THREE.Vector3(dot(ex, P0), -dot(ey, P0), -dot(ez, P0)) // -R^T P0
+	let target = position.clone().addScaledVector(forward, P0[2]) // on the optical axis, as deep as the geode's center
+	return {
+		position, target, right, up: down.clone().negate(), back: forward.clone().negate(),
+		focal: (rect.height / 2) / Math.tan(pm.fov * Math.PI / 360),
+		px: rect.left + rect.width / 2, py: rect.top + rect.height / 2,
+	}
 }
 
 /** Purple mask -> canvas (translucent purple where the mask is set), for the overlay tint */
@@ -471,8 +517,8 @@ function drawSeg3D(ctx, A, B, f, cx, cy) {
 
 /** Overlays the 3D lattice (floor grid under the detected cubes) and the detected cubes as wireframes, both from the automatic camera fit */
 function drawAutoOverlay(ctx, canvas) {
-	if (autoMask && (autoCalState === 'running' || calibration_show_mask.checked)) ctx.drawImage(autoMask, 0, 0, canvas.width, canvas.height)
-	if (autoLines && (autoCalState === 'running' || calibration_show_lines.checked)) {
+	if (autoMask && (autoCalState === 'running' || overlayOn(calibration_show_mask, false))) ctx.drawImage(autoMask, 0, 0, canvas.width, canvas.height)
+	if (autoLines && (autoCalState === 'running' || overlayOn(calibration_show_lines, false))) {
 		let sx = canvas.width / autoLines.w, sy = canvas.height / autoLines.h, AXIS_COL = ['#ff5050', '#50ff50', '#5aa0ff']
 		ctx.lineWidth = 3
 		for (let i = 0; i < autoLines.shown; i++) {
@@ -488,7 +534,7 @@ function drawAutoOverlay(ctx, canvas) {
 	let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
 	for (let c of cubes) { let v = [c.i, c.j, c.k]; for (let n = 0; n < 3; n++) { lo[n] = Math.min(lo[n], v[n]); hi[n] = Math.max(hi[n], v[n]) } }
 
-	if (calibration_show_diff.checked && autoCal && autoCal.an) {
+	if (overlayOn(calibration_show_diff, false) && autoCal && autoCal.an) {
 		// where the union of the detected cubes disagrees with the purple mask (mask resolution, drawn scaled up): red = covered but not purple, blue = purple but not covered
 		let an = autoCal.an, fm = focalPx(autoCubes.fov, an.h), cov = new Uint8Array(an.w * an.h)
 		for (let c of cubes) {
@@ -507,13 +553,13 @@ function drawAutoOverlay(ctx, canvas) {
 		ctx.imageSmoothingEnabled = true
 	}
 
-	if (calibration_show_grid.checked) {
+	if (overlayOn(calibration_show_grid, true)) {
 		ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.45)'
 		let y = lo[1] - 0.5
 		for (let i = lo[0] - 0.5; i <= hi[0] + 0.51; i++) drawSeg3D(ctx, at(i, y, lo[2] - 0.5), at(i, y, hi[2] + 0.5), f, cx, cy)
 		for (let k = lo[2] - 0.5; k <= hi[2] + 0.51; k++) drawSeg3D(ctx, at(lo[0] - 0.5, y, k), at(hi[0] + 0.5, y, k), f, cx, cy)
 	}
-	if (calibration_show_cubes.checked) {
+	if (overlayOn(calibration_show_cubes, true)) {
 		ctx.lineWidth = 2
 		let runs = visibleCubeEdges(cubes.map((c) => at(c.i, c.j, c.k)), ax, f, cx, cy)
 		cubes.forEach((c, n) => {
@@ -524,7 +570,7 @@ function drawAutoOverlay(ctx, canvas) {
 		ctx.save(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.setLineDash([4, 4]) // taken out by hand: thin dashed, all 12 edges
 		for (let c of removed) { let C = cubeCorners(c.P, ax); for (let [a, b] of CUBE_EDGES) drawSeg3D(ctx, C[a], C[b], f, cx, cy) }
 		ctx.restore()
-		if (calibration_show_labels.checked) {
+		if (overlayOn(calibration_show_labels, false)) {
 			ctx.font = '12px sans-serif'; ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3
 			for (let c of cubes) {
 				let p = projectCam(at(c.i, c.j, c.k), f, cx, cy), txt = c.i + ',' + c.j + ',' + c.k
@@ -538,7 +584,7 @@ function drawAutoOverlay(ctx, canvas) {
 /** The probe cube: its silhouette split into free+purple (green), free but not purple (red) and covered by nearer cubes (grey), and its 12 edges (the 3 hidden ones dashed) */
 function drawProbe(ctx, canvas, at, f, cx, cy, ax) {
 	let I = probe.info, an = autoCal.an
-	if (!probe.tint) {
+	if (App.debug && !probe.tint) {
 		let tc = document.createElement('canvas'); tc.width = an.w; tc.height = an.h
 		let tctx = tc.getContext('2d'), img = tctx.createImageData(an.w, an.h)
 		const paint = (list, r, g, b, a) => { for (let q of list) { img.data[q * 4] = r; img.data[q * 4 + 1] = g; img.data[q * 4 + 2] = b; img.data[q * 4 + 3] = a } }
@@ -546,9 +592,11 @@ function drawProbe(ctx, canvas, at, f, cx, cy, ax) {
 		tctx.putImageData(img, 0, 0)
 		probe.tint = tc
 	}
-	ctx.imageSmoothingEnabled = false
-	ctx.drawImage(probe.tint, 0, 0, canvas.width, canvas.height)
-	ctx.imageSmoothingEnabled = true
+	if (App.debug) { // the silhouette tint is a diagnostic: end users only see the cube outline
+		ctx.imageSmoothingEnabled = false
+		ctx.drawImage(probe.tint, 0, 0, canvas.width, canvas.height)
+		ctx.imageSmoothingEnabled = true
+	}
 	let P = at(I.i, I.j, I.k), C = cubeCorners(P, ax)
 	ctx.save(); ctx.lineWidth = 3; ctx.strokeStyle = I.taken ? '#22ff88' : '#ff4d4d'
 	ctx.setLineDash([6, 5]); for (let [a, b] of CUBE_EDGES) drawSeg3D(ctx, C[a], C[b], f, cx, cy) // all 12 dashed (the hidden ones stay dashed)...
@@ -685,6 +733,37 @@ function updateCalibrationStats() {
 	} else if (autoCalState === 'done') html += '<br><span style="color:#f87171">fewer than 2 cubes readable from the lines: nothing to anchor the lattice to (or too little purple)</span>'
 	html += probeHtml()
 	calibration_stats.innerHTML = html
+	updateScanSummary()
+}
+
+/** The end-user view of stage 1, in the step card: progress while the scan runs, then the result and the block picker (the full diagnostics stay in the debug panel) */
+function updateScanSummary() {
+	let el = document.getElementById('scan_status')
+	if (!el) return
+	const ORDER = ['mask', 'lines', 'refine', 'camera', 'texture', 'lattice', 'cells']
+	const LABEL = { mask: 'Finding the purple blocks', lines: 'Tracing their edges', refine: 'Sharpening the edges', camera: 'Working out where the camera was', texture: 'Learning the block texture', lattice: 'Placing the blocks in 3D', cells: 'Choosing the blocks' }
+	const busy = (text, n) => '<div class="busy"><span class="spin"></span>' + text + (n ? ' <span class="muted">' + n + '/' + ORDER.length + '</span>' : '') + '</div>' +
+		(n ? '<div class="meter"><i style="width:' + Math.round(100 * n / ORDER.length) + '%"></i></div>' : '')
+	let html
+	if (!calibrationImage.naturalWidth) html = busy('Loading the screenshot…')
+	else if (!cvReady) html = busy('Loading the image analyser (a few MB, first time only)…')
+	else if (autoCalState !== 'done') {
+		let n = autoLive ? ORDER.indexOf(autoLive.phase) : -1
+		html = busy(n >= 0 ? LABEL[ORDER[n]] + '…' : 'Starting the scan…', n >= 0 ? n + 1 : 0)
+	} else if (!autoCubes || !autoCubes.cubes.length) {
+		html = '<div class="bad"><b>No geode found in this screenshot.</b></div><div class="muted">Try one taken a bit closer, with the purple blocks well lit and nothing in front of them.</div>'
+	} else {
+		let fc = finalCubes(), added = fc.cubes.filter((c) => c.manual).length
+		html = '<div class="ok"><b>' + fc.cubes.length + ' blocks found</b>' + (added || fc.removed.length ? ' <span class="muted">(you added ' + added + ', removed ' + fc.removed.length + ')</span> <button class="link" onclick="clearManualEdits()">Undo my changes</button>' : '') + '</div>'
+		if (!probe || !probe.info) html += '<div class="muted">Something wrong? Click the photo to pick a block.</div>'
+		else {
+			let I = probe.info, inRes = fc.cubes.some((q) => q.i === I.i && q.j === I.j && q.k === I.k)
+			html += '<div class="pick"><span>This block is <b>' + (inRes ? 'in your geode' : 'not in your geode') + '</b></span>' +
+				'<button onclick="toggleProbeCube()">' + (inRes ? 'Remove it' : 'Add it') + ' <kbd>X</kbd></button></div>' +
+				'<div class="muted">Scroll to move nearer or farther · ' + (probe.frozen ? 'click to unlock' : 'click to lock') + ' · <kbd>Esc</kbd> to stop</div>'
+		}
+	}
+	el.innerHTML = html
 }
 
 /** Wires up the stage-1 panel controls (photo select, recompute, overlay checkboxes) once */
@@ -741,7 +820,7 @@ function setupCalibrationCanvas() {
 
 /** Renders one stage of the pipeline (1-7; stage 1 is the photo/line-detection view, see above) from the already computed snapshots */
 function renderStage(stage) {
-	if (pipeline === null) return
+	if (pipeline === null && stage !== 1) return // stage 1 is the photo itself: it needs no vein yet
 	currentStage = stage
 
 	if (stage === 1) {
@@ -771,17 +850,28 @@ function renderStage(stage) {
 
 	let displaySize = { x: display.maxX(), y: display.maxY(), z: display.maxZ() }
 	let originalSize = { x: pipeline.vein.maxX(), y: pipeline.vein.maxY(), z: pipeline.vein.maxZ() }
+	// where buildDisplay() put the vein inside the display (inverted axes push it forward by gap+1;
+	// stage 2 shows the bare vein, so no shift there)
+	let shift = {
+		x: pipelineStage > 1 && settings.invert.x ? settings.gap + 1 : 0,
+		y: pipelineStage > 1 && settings.invert.y ? settings.gap + 1 : 0,
+		z: pipelineStage > 1 && settings.invert.z ? settings.gap + 1 : 0,
+	}
+	// the geode's own center is drawn at the world origin, so it stays in the same spot on screen
+	// whatever step is shown or however gap/invert/show reshape the display around it
+	let center = {
+		x: shift.x + (originalSize.x - 1) / 2,
+		y: shift.y + (originalSize.y - 1) / 2,
+		z: shift.z + (originalSize.z - 1) / 2,
+	}
+	// the debug ortho views still frame the whole display, not just the geode
+	ST.setOrthoTarget({ x: (displaySize.x - 1) / 2 - center.x, y: (displaySize.y - 1) / 2 - center.y, z: (displaySize.z - 1) / 2 - center.z })
 
 	// stage 7's machine blocks aren't part of `display` (addMachinesToScene draws them
 	// separately), so they're computed up front here: once to feed the layer view's occupied
 	// range below, once to actually draw them further down
 	let machineBlocksByAxis = null
 	if (pipelineStage === 6) {
-		let shift = {
-			x: settings.invert.x ? settings.gap + 1 : 0,
-			y: settings.invert.y ? settings.gap + 1 : 0,
-			z: settings.invert.z ? settings.gap + 1 : 0,
-		}
 		machineBlocksByAxis = {}
 		for (let axis of ['x','y','z']) {
 			if (!settings.show[axis]) continue
@@ -807,11 +897,26 @@ function renderStage(stage) {
 	}
 	let layerY = layerView.enabled ? layerView.y : null
 
-	ST.addMeshToScene(display, layerY)
+	ST.addMeshToScene(display, layerY, center)
 
-	// group index numbers only make sense once groups exist (pipeline stage 4+)
-	if (pipelineStage >= 4) {
-		ST.updateGroupLabels(pipeline.data_layers, displaySize, originalSize, settings.gap, settings.invert, settings.show)
+	// layer view: a faint block grid under the current layer, over the display's footprint
+	// (grown to fit stage 7's machines, which can stick out of it) plus a 1-block margin
+	if (layerY !== null) {
+		let ext = { minX: 0, maxX: displaySize.x - 1, minZ: 0, maxZ: displaySize.z - 1 }
+		if (machineBlocksByAxis) {
+			for (let axis in machineBlocksByAxis) {
+				for (let b of machineBlocksByAxis[axis]) {
+					ext.minX = Math.min(ext.minX, b.x); ext.maxX = Math.max(ext.maxX, b.x)
+					ext.minZ = Math.min(ext.minZ, b.z); ext.maxZ = Math.max(ext.maxZ, b.z)
+				}
+			}
+		}
+		ST.addLayerGrid(layerY, center, { minX: ext.minX - 1, maxX: ext.maxX + 1, minZ: ext.minZ - 1, maxZ: ext.maxZ + 1 })
+	}
+
+	// group index numbers only make sense once groups exist (pipeline stage 4+); they sit in the per-axis views (debug only)
+	if (pipelineStage >= 4 && ST.view.ortho) {
+		ST.updateGroupLabels(pipeline.data_layers, center, originalSize, settings.gap, settings.invert, settings.show)
 	} else {
 		ST.clearGroupLabels()
 	}
@@ -819,16 +924,15 @@ function renderStage(stage) {
 	// stage 7: one flying machine per final group, pushing into the geode along its axis
 	if (machineBlocksByAxis) {
 		for (let axis in machineBlocksByAxis) {
-			ST.addMachinesToScene(machineBlocksByAxis[axis], displaySize, layerY)
+			ST.addMachinesToScene(machineBlocksByAxis[axis], center, layerY)
 		}
 	}
 
-	if (stage_info) {
-		let label = 'Stage ' + stage + '/' + LAST_STAGE + ' - ' + STAGE_NAMES[stage] + ' - vein: ' + (pipeline.source ? 'photo ' + pipeline.source : 'random (r)') + ' (keys 1-' + LAST_STAGE + ' to switch)'
-		if (layerView.enabled) label += ' | Layer ' + layerView.y + ' [' + occupied.min + '-' + occupied.max + '] (up/down arrows, \'l\' to exit)'
-		else label += " ('l' for the layer view)"
-		stage_info.innerHTML = label
-	}
+	layerView.min = occupied.min; layerView.max = occupied.max
+	let label = 'Stage ' + stage + '/' + LAST_STAGE + ' - ' + STAGE_NAMES[stage] + ' - vein: ' + (pipeline.source ? 'photo ' + pipeline.source : 'random') + ', seed ' + pipeline.seed
+	if (layerView.enabled) label += ' | Layer ' + layerView.y + ' [' + occupied.min + '-' + occupied.max + ']'
+	stage_info.innerHTML = label
+	App.afterRender()
 }
 
 /** 0 -> "100% honey", 100 -> "100% slime", in between -> the split, e.g. "70% slime / 30% honey" */
@@ -873,6 +977,7 @@ function setupSettingsMenu() {
 	})
 	for (let axis of ['x','y','z']) {
 		let invertCheckbox = document.getElementById('invert_' + axis)
+		invertCheckbox.checked = settings.invert[axis]
 		invertCheckbox.addEventListener('change', () => {
 			settings.invert[axis] = invertCheckbox.checked
 			if (pipeline !== null) renderStage(currentStage)
@@ -886,71 +991,47 @@ function setupSettingsMenu() {
 		})
 	}
 
+	// debug panel: a new saved geode from the pasted JSON, or a random one from the sliders
 	generate_btn.addEventListener('click', () => {
 		let json = import_json.value.trim()
-		if (json) {
-			let parsed
-			try {
-				parsed = veinFromExport(JSON.parse(json))
-			} catch (e) {
-				flashStageMessage('Invalid JSON: ' + e.message)
-				return
-			}
-			processVein(parsed.vein, parsed.seed)
-		} else {
-			newRun()
+		if (!json) { App.newGeode(); return }
+		let parsed
+		try {
+			parsed = veinFromExport(JSON.parse(json))
+		} catch (e) {
+			flashStageMessage('Invalid JSON: ' + e.message)
+			return
 		}
-		addDebugInfo()
-		renderStage(currentStage)
+		App.newGeode(parsed)
 	})
 }
 
 window.addEventListener(`DOMContentLoaded`, () => {
+	App.loadPrefs() // before the menus read `settings`
 	ST.new()
-
-	newRun()
-
-	addDebugInfo()
-	setupSettingsMenu()
-
 	ST.setUpCameras()
+	setupSettingsMenu()
 	addSynthScenesToMenu()
-	calibration_photo.value = 'geode01' // the browser restores the old selection on refresh, while the photo shown is always geode-01
-	loadCalibrationPhoto('geode01')
-	renderStage(currentStage)
+	App.init() // landing page (or index.html#dev: the old developer session, photo geode-01 on stage 1)
 	ST.animate()
 });
 
 document.addEventListener('keydown', (event) => {
-	// don't let typing in the settings menu's inputs trigger these shortcuts
-	if (['INPUT','TEXTAREA'].includes(event.target.tagName)) return
+	// don't let typing in the inputs trigger these shortcuts
+	if (['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)) return
+	if (!App.inWorkspace() || App.modalOpen()) return
 
-	if (event.key === 'r') {
-		newRun()
-		addDebugInfo()
-		renderStage(currentStage)
-	}
-	if (event.key === 'i') {
-		debug_info.style.display = (debug_info.style.display == 'none') ? 'block' : 'none';
-	}
-	if (event.key === 'm') {
-		settings_menu.style.display = (settings_menu.style.display == 'none') ? 'block' : 'none';
-	}
+	if (event.key === 'r' && App.debug) App.newGeode()
 	if (event.key === 'Escape' && probe) { probe = null; if (currentStage === 1) redrawCalibrationCanvas() }
-	if (event.key === 'c' && probe && currentStage === 1) copyProbe()
-	if (event.key === 'x' && probe && currentStage === 1) toggleProbeCube()
+	if (event.key === 'c' && probe && currentStage === 1 && App.debug) copyProbe()
+	if ((event.key === 'x' || event.key === 'X') && probe && currentStage === 1) toggleProbeCube()
 	if (event.key === '0' && currentStage === 1) resetPhotoZoom()
-	if (['1','2','3','4','5','6','7'].includes(event.key)) {
-		renderStage(parseInt(event.key))
-	}
-	if (event.key === 'e') {
-		exportVein()
-	}
-	if (event.key === 'l') {
-		layerView.enabled = !layerView.enabled
-		renderStage(currentStage)
-	}
-	if (layerView.enabled && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+	if (['1','2','3','4','5','6','7'].includes(event.key)) App.goStep(parseInt(event.key))
+	if (event.key === 'ArrowRight') App.goStep(currentStage + 1)
+	if (event.key === 'ArrowLeft') App.goStep(currentStage - 1)
+	if (event.key === 'e' && App.debug) exportVein()
+	if (event.key === 'l' && currentStage > 1) App.toggleLayers()
+	if (layerView.enabled && currentStage > 1 && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
 		event.preventDefault() // don't scroll the page
 		layerView.y += (event.key === 'ArrowUp' ? 1 : -1) // renderStage() clamps this to the occupied range
 		renderStage(currentStage)

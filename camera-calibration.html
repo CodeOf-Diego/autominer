@@ -65,7 +65,6 @@
 	</div>
 </div>
 
-<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
 <script>
 let img = new Image()
 let cvReady = false
@@ -387,5 +386,7 @@ function renderResults(clusters, w, h) {
 
 document.getElementById('run_btn').addEventListener('click', run)
 </script>
+<!-- after the script above, so onOpenCvReady already exists even when opencv.js comes from cache -->
+<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
 </body>
 </html>
