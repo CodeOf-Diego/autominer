@@ -1,0 +1,12 @@
+{
+  "name": "autominer",
+  "private": true,
+  "description": "Flying machines that harvest an amethyst geode, from a Minecraft screenshot",
+  "scripts": {
+    "build": "node tools/build.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "three": "0.186.0"
+  }
+}

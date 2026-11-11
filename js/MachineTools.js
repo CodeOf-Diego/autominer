@@ -1,7 +1,7 @@
 /**
- * Flying machine template, transcribed block-by-block from the Geodesy mod's source
- * (GeodesyCore.java::buildMachine(), github.com/kosmolot-mods/geodesy - verified against the
- * raw setBlock() calls, not just the method's ASCII-art comment). a = steps outward from the
+ * Flying machine template: the slime/honey flying machine of the public amethyst farm design (popularised by
+ * ilmango), block by block. Coordinates cross-checked against the Geodesy mod's GeodesyCore.java::buildMachine()
+ * (github.com/kosmolot-mods/geodesy, its raw setBlock() calls, not just the method's ASCII-art comment). a = steps outward from the
  * geode along the push axis, u = steps across the 3-wide cross section.
  *
  * a=0's obsidian is a FIXED anchor, not part of the moving body (it's placed once from a

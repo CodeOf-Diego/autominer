@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Autominer</title>
+    <meta name="description" content="Turn a Minecraft screenshot of an amethyst geode into the flying machines of an automatic amethyst farm. Runs in the browser. Instructions for AI agents: llms.txt">
+    <link rel="help" type="text/markdown" href="llms.txt">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="app.css">
@@ -23,20 +25,73 @@
 	<script src="js/Tools.js" defer></script>
 	<script src="js/Matrix2D.js" defer></script>
 	<script src="js/Matrix3D.js" defer></script>
-	<script src="js/BuildingTools.js" defer></script>
+	<script src="js/building/plain.js" defer></script>
+	<script src="js/building/areas.js" defer></script>
+	<script src="js/building/l-shapes.js" defer></script>
+	<script src="js/building/split-areas.js" defer></script>
+	<script src="js/building/area-distances.js" defer></script>
+	<script src="js/building/forest.js" defer></script>
+	<script src="js/building/grouping.js" defer></script>
+	<script src="js/building/support-blocks.js" defer></script>
+	<script src="js/building/group-plains.js" defer></script>
 	<script src="js/MachineTools.js" defer></script>
 	<script src="js/TextureData.js" defer></script>
-	<script src="js/SceneTools.js" defer></script>
+	<script src="js/scene/materials.js" defer></script>
+	<script src="js/scene/scene-tools.js" defer></script>
+	<script src="js/scene/cameras.js" defer></script>
+	<script src="js/scene/vein-mesh.js" defer></script>
+	<script src="js/scene/machines-mesh.js" defer></script>
+	<script src="js/scene/group-labels.js" defer></script>
+	<script src="js/scene/debug-info.js" defer></script>
 	<script src="js/PhotoData.js" defer></script>
-	<script src="js/CalibrationTools.js" defer></script>
+	<script src="js/scan/opencv-ready.js" defer></script>
+	<script src="js/scan/purple-mask.js" defer></script>
+	<script src="js/scan/photo-analysis.js" defer></script>
+	<script src="js/scan/mask-lines.js" defer></script>
+	<script src="js/scan/refine-lines.js" defer></script>
+	<script src="js/scan/texture.js" defer></script>
+	<script src="js/scan/cells.js" defer></script>
+	<script src="js/scan/geometry.js" defer></script>
+	<script src="js/scan/linear.js" defer></script>
+	<script src="js/scan/cube-poses.js" defer></script>
+	<script src="js/scan/lattice.js" defer></script>
+	<script src="js/scan/camera-from-lines.js" defer></script>
+	<script src="js/scan/auto-calibrate.js" defer></script>
 	<script src="reference/synthetic/tools/synth_page.js" defer></script>
-	<script src="js/App.js" defer></script>
-	<script src="main.js" defer></script>
+	<script src="js/app/dom-utils.js" defer></script>
+	<script src="js/app/store.js" defer></script>
+	<script src="js/app/thumbs.js" defer></script>
+	<script src="js/app/prefs.js" defer></script>
+	<script src="js/app/steps.js" defer></script>
+	<script src="js/app/app.js" defer></script>
+	<script src="js/app/saving.js" defer></script>
+	<script src="js/app/toast.js" defer></script>
+	<script src="js/app/landing.js" defer></script>
+	<script src="js/app/geodes.js" defer></script>
+	<script src="js/app/steps-hud.js" defer></script>
+	<script src="js/app/play-build.js" defer></script>
+	<script src="js/app/init.js" defer></script>
+	<script src="js/main/state.js" defer></script>
+	<script src="js/stage1/photo.js" defer></script>
+	<script src="js/stage1/synth-scenes.js" defer></script>
+	<script src="js/stage1/scan-run.js" defer></script>
+	<script src="js/stage1/manual-edits.js" defer></script>
+	<script src="js/stage1/photo-vein.js" defer></script>
+	<script src="js/stage1/overlay.js" defer></script>
+	<script src="js/stage1/probe.js" defer></script>
+	<script src="js/main/copy-text.js" defer></script>
+	<script src="js/stage1/panel.js" defer></script>
+	<script src="js/stage1/canvas-input.js" defer></script>
+	<script src="js/main/pipeline.js" defer></script>
+	<script src="js/main/render-stage.js" defer></script>
+	<script src="js/main/settings-menu.js" defer></script>
+	<script src="js/main/boot.js" defer></script>
 	<!-- stage 1 (photo scan): downloads lazily in the background, a few MB -->
-	<!-- async: when cached it can finish BEFORE the defer scripts run, so onload only sets a flag if CalibrationTools.js isn't there yet -->
+	<!-- async: when cached it can finish BEFORE the defer scripts run, so onload only sets a flag if js/scan/opencv-ready.js isn't there yet -->
 	<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="window.cvScriptLoaded = true; if (window.onOpenCvReady) onOpenCvReady()"></script>
 </head>
   <body data-screen="landing" data-debug="0">
+    <noscript><p style="color:#eee;padding:24px;font-family:sans-serif">Autominer runs entirely in the browser and needs JavaScript and WebGL. It turns a Minecraft screenshot of an amethyst geode into the layout of an automatic amethyst farm. AI agents: see <a href="llms.txt" style="color:#b48cff">llms.txt</a> for how to drive it with a browser.</p></noscript>
     <!-- the three.js canvas (#scene_canvas) is added by SceneTools; step 1 shows the photo here instead -->
     <div id="calibration_view">
       <div id="calibration_zoom_box"><canvas id="calibration_canvas"></canvas></div>

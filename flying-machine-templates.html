@@ -122,10 +122,10 @@ button.action:disabled{opacity:.45; cursor:default}
       <span class="eyebrow">Autominer &middot; component research</span>
     </div>
     <h1>Flying machine templates</h1>
-    <p class="sub">Two mechanisms for pushing and retracting the slime/honey blocks of the mining system: the single piston (probably enough for our case) and the machine from the Geodesy mod, which the project grew out of &mdash; rebuilt here block by block from its source code. Rotate, zoom and move into the scene to inspect them from inside.</p>
+    <p class="sub">Two mechanisms for pushing and retracting the slime/honey blocks of the mining system: the single piston (probably enough for our case) and the flying machine of the public amethyst farm design popularised by ilmango &mdash; rebuilt here block by block. Rotate, zoom and move into the scene to inspect them from inside.</p>
     <div class="tabs" role="tablist" aria-label="Templates">
       <button class="tab" id="tab-single" role="tab" aria-selected="true">01 &middot; Single piston</button>
-      <button class="tab" id="tab-engine" role="tab" aria-selected="false">02 &middot; Geodesy machine</button>
+      <button class="tab" id="tab-engine" role="tab" aria-selected="false">02 &middot; Farm machine</button>
     </div>
   </header>
 
@@ -190,14 +190,14 @@ button.action:disabled{opacity:.45; cursor:default}
     single: '<div class="desc">A <b>sticky piston</b> pushes the entire chain of connected slime/honey blocks in front of it (up to 12 blocks).</div>' +
       '<div class="desc">On release, it <b>pulls back the entire connected chain</b> through the slime/honey &mdash; not just the block in direct contact. Source: official wiki, Sticky Piston page: "pulls the block attached to its head and any blocks attached to the head via slime- or honey blocks".</div>' +
       '<div class="desc">This means that for our groups (&le;12 blocks, already connected) <b>a single sticky piston</b> may be enough to handle both push and return, without a real flying machine.</div>',
-    engine: '<div class="desc">The machine used by the <b>Geodesy</b> mod (which this project grew out of) to push each slime/honey island against the geode. It is a <b>linear</b> structure (9 blocks long &times; 3 wide &times; 1 thick), not L-shaped &mdash; the L shape required by the solver applies to the <b>island</b> being pushed, not to the contraption that pushes it.</div>' +
+    engine: '<div class="desc">The flying machine of the amethyst farm design popularised by <b>ilmango</b>, used to push each slime/honey island against the geode. It is a <b>linear</b> structure (9 blocks long &times; 3 wide &times; 1 thick), not L-shaped &mdash; the L shape required by the solver applies to the <b>island</b> being pushed, not to the contraption that pushes it.</div>' +
       '<div class="desc">Two piston+observer pairs trigger each other in sequence along the structure, making it "walk" back and forth between the two <b>obsidian</b> blocks at the ends, which stop the machine and send it back &mdash; this is the return system we were talking about.</div>' +
       '<div class="desc">The redstone lamp and note block are only status indicators (they light up/play a sound when the machine passes by); the basic mechanism does not need them.</div>',
   };
 
   var NOTE = {
     single: 'Mechanics verified against the official documentation (minecraft.wiki/w/Sticky_Piston). Sizes and materials here are simplified for the demo.',
-    engine: 'Verified line by line against the mod source code: <a href="https://github.com/kosmolot-mods/geodesy/blob/main/src/main/java/pl/kosma/geodesy/GeodesyCore.java" target="_blank" rel="noopener">GeodesyCore.java, buildMachine() method</a>. Not a rough approximation.'
+    engine: 'Coordinates cross-checked line by line against the Geodesy mod, which builds the same machine: <a href="https://github.com/kosmolot-mods/geodesy/blob/main/src/main/java/pl/kosma/geodesy/GeodesyCore.java" target="_blank" rel="noopener">GeodesyCore.java, buildMachine() method</a>. Not a rough approximation.'
   };
 
   function renderLegend(which){
@@ -351,8 +351,8 @@ button.action:disabled{opacity:.45; cursor:default}
     requestAnimationFrame(step);
   }
 
-  // ---------- Template 2: Geodesy mod's actual flying machine ----------
-  // Transcribed directly from GeodesyCore.java's buildMachine() (world.setBlock calls, in
+  // ---------- Template 2: the farm's flying machine (public design, popularised by ilmango) ----------
+  // Coordinates cross-checked against Geodesy's GeodesyCore.java buildMachine() (world.setBlock calls, in
   // source order). a = steps along the travel direction, u = steps along the 3-wide cross
   // section. directionAlong -> +X here, directionUp -> +Y. z is always 0 (the whole machine
   // is a single block deep). "along"/"-along" and "up"/"-up" match the source's Direction args.
@@ -434,7 +434,7 @@ button.action:disabled{opacity:.45; cursor:default}
     tabEngine.setAttribute('aria-selected', String(!isSingle));
     ctrlSingle.hidden = !isSingle;
     ctrlEngine.hidden = isSingle;
-    stageTitle.textContent = isSingle ? 'Sticky piston + slime chain' : 'Geodesy mod machine (19 blocks)';
+    stageTitle.textContent = isSingle ? 'Sticky piston + slime chain' : 'Farm flying machine (19 blocks)';
     descBody.innerHTML = isSingle ? DESC.single : DESC.engine;
     accNote.innerHTML = '<b>Accuracy:</b> ' + (isSingle ? NOTE.single : NOTE.engine);
     renderLegend(which);

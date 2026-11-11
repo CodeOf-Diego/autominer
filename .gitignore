@@ -2,3 +2,6 @@
 reference/screenshots/*.png
 reference/synthetic/*.png
 reference/synthetic/*.json
+
+# npm (only the release build uses it: npm run build)
+node_modules/

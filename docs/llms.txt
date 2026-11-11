@@ -1,0 +1,29 @@
+# Autominer
+
+> Web app that turns a Minecraft screenshot of an amethyst geode into the layout of an automatic amethyst farm: it finds the budding amethyst blocks in the image (camera + block lattice solved from the block edges), then computes, for each axis X/Y/Z, the groups of at most 12 blocks a piston can push, slime or honey for each group, and one flying machine per group. App: https://codeof-diego.github.io/autominer/
+
+Everything runs client-side in JavaScript (WebGL for the 3D view, OpenCV.js from a CDN for the scan). Fetching the HTML alone computes nothing: to use the app you need a real browser (e.g. a headless browser driven by Playwright or Puppeteer, or a browser-use tool). No data is sent to any server; saved geodes stay in the browser's IndexedDB.
+
+## How an agent can use it
+
+1. Open the app URL and wait until the landing page is shown (`document.body.dataset.screen === 'landing'`).
+2. Input, one of:
+   - a screenshot: set the file input `#photo_input` to a PNG/JPG (e.g. Playwright `page.setInputFiles('#photo_input', path)`). The scan takes a few seconds (longer the first time, while OpenCV.js downloads). It is done when `App.entry.vein` is set; `App.entry.blocks` is the number of budding amethyst blocks found (0 or no vein after ~60 s: the scan failed, usually because the geode is not cleared or is covered by grown buds);
+   - a random demo geode: click `[data-action="random"]`;
+   - a known geode: open the debug tools (Settings, Debug tools) and paste `{seed, size, ores}` into Import JSON.
+3. Steps 1-7 (scan, geode, borders, reachable, groups, materials, machines): call `App.goStep(n)` or press the keys `1`-`7`. The current step's explanation is in `#step_short` and `#step_desc`.
+4. Output available today:
+   - `App.entry.vein`: the geode as JSON `{seed, size: [x, y, z], ores: [[x, y, z], ...]}`, the budding amethyst cells, 0-based;
+   - the farm (steps 3-7) is shown in 3D only. A machine-readable result (every block with position, type and facing, per axis and group, plus a materials list) is planned but not available yet: do not scrape internal variables, they are not a stable interface.
+
+## Limits to report to the user
+
+- Step 7 (flying machines) is a first version and NOT buildable yet: the obsidian anchors are misplaced and machines of different groups may touch.
+- Some geodes cannot be split using only slime and honey; far or bud-covered blocks may be missed by the scan (the user can fix them by hand in step 1).
+- Vanilla textures only.
+
+## Docs
+
+- [README](https://github.com/CodeOf-Diego/autominer/blob/main/README.md): what it does, how to take a good screenshot, steps, keys
+- [How it works](https://github.com/CodeOf-Diego/autominer/blob/main/HOW-IT-WORKS.md): the scan, the grouping, the machines
+- [Roadmap](https://github.com/CodeOf-Diego/autominer/blob/main/ROADMAP.md): status and open problems
